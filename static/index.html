@@ -1,0 +1,641 @@
+<!DOCTYPE html>
+<html class="dark" lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <meta content="width=device-width, initial-scale=1.0, viewport-fit=cover" name="viewport" />
+    <title>Expense Tracker</title>
+
+    <link href="https://fonts.googleapis.com" rel="preconnect" />
+    <link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect" />
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap"
+        rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap"
+        rel="stylesheet" />
+
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <script>
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "primary": "#137fec",
+                        "background-light": "#f6f7f8",
+                        "background-dark": "#101922",
+                        "surface-dark": "#1c232d",
+                        "border-dark": "#2a3441",
+                        "text-secondary": "#9dabb9"
+                    },
+                    fontFamily: { "display": ["Manrope", "sans-serif"] },
+                },
+            },
+        }
+    </script>
+    <style>
+        body {
+            min-height: 100dvh;
+        }
+
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+
+        .no-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+
+        .no-scrollbar {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+    </style>
+</head>
+
+<body class="bg-background-light dark:bg-background-dark text-gray-900 dark:text-white font-display">
+    <div id="app" class="min-h-screen flex flex-col"></div>
+
+    <script>
+        const API_BASE = '/api';
+
+        // State
+        let selectedFile = null;
+
+        const api = {
+            async uploadCSV(file, accountType, accountName) {
+                const formData = new FormData();
+                formData.append('file', file);
+                if (accountType) formData.append('account_type', accountType);
+                if (accountName) formData.append('account_name', accountName);
+                const res = await fetch(`${API_BASE}/upload-csv`, { method: 'POST', body: formData });
+                return res.json();
+            },
+            async getStatements(status = null, filename = null) {
+                let url = `${API_BASE}/credit-card-statements?limit=500`;
+                if (status) url += `&status_filter=${status}`;
+                if (filename) url += `&filename_filter=${encodeURIComponent(filename)}`;
+                const res = await fetch(url);
+                return res.json();
+            },
+            async getStatement(id) {
+                const res = await fetch(`${API_BASE}/credit-card-statements/${id}`);
+                return res.json();
+            },
+            async approveStatement(id, expenseData) {
+                const res = await fetch(`${API_BASE}/credit-card-statements/${id}/approve`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(expenseData)
+                });
+                return res.json();
+            },
+            async getTables() {
+                const res = await fetch(`${API_BASE}/tables`);
+                return res.json();
+            },
+            async getUploadedFiles() {
+                const res = await fetch(`${API_BASE}/uploaded-files`);
+                return res.json();
+            },
+            async deleteFile(filename) {
+                const res = await fetch(`${API_BASE}/uploaded-files/${encodeURIComponent(filename)}`, { method: 'DELETE' });
+                return res.json();
+            },
+            async clearTable(tableName) {
+                const res = await fetch(`${API_BASE}/tables/${tableName}/clear`, { method: 'DELETE' });
+                return res.json();
+            },
+            async createExpense(data) {
+                const res = await fetch(`${API_BASE}/expenses`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                });
+                return res.json();
+            },
+            exportExpenses(startDate, endDate) {
+                let url = `${API_BASE}/expenses/export?`;
+                if (startDate) url += `start_date=${startDate}&`;
+                if (endDate) url += `end_date=${endDate}`;
+                window.open(url, '_blank');
+            }
+        };
+
+        const router = {
+            currentRoute: 'home',
+            params: {},
+            navigate(route, params = {}) {
+                this.currentRoute = route;
+                this.params = params;
+                this.render();
+            },
+            render() {
+                const app = document.getElementById('app');
+                switch (this.currentRoute) {
+                    case 'home': app.innerHTML = screens.home(); screens.initHome(); break;
+                    case 'upload': app.innerHTML = screens.upload(); screens.initUpload(); break;
+                    case 'files': app.innerHTML = screens.files(); screens.initFiles(); break;
+                    case 'list': app.innerHTML = screens.list(); screens.initList(); break;
+                    case 'details': app.innerHTML = screens.details(this.params.id); screens.initDetails(this.params.id); break;
+                    case 'addExpense': app.innerHTML = screens.addExpense(); screens.initAddExpense(); break;
+                    case 'settings': app.innerHTML = screens.settings(); screens.initSettings(); break;
+                }
+            }
+        };
+
+        const screens = {
+            // Home Dashboard
+            home() {
+                return `
+                <div class="flex flex-col min-h-screen">
+                    <header class="flex items-center justify-between p-4 border-b border-gray-200 dark:border-border-dark">
+                        <h1 class="text-xl font-bold">Expense Tracker</h1>
+                        <button onclick="router.navigate('settings')" class="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700">
+                            <span class="material-symbols-outlined">settings</span>
+                        </button>
+                    </header>
+                    <main class="flex-1 p-4 space-y-4">
+                        <div id="statsGrid" class="grid grid-cols-2 gap-3">
+                            <div class="bg-white dark:bg-surface-dark p-4 rounded-xl">
+                                <p class="text-text-secondary text-sm">Pending</p>
+                                <p id="statPending" class="text-2xl font-bold text-yellow-500">-</p>
+                            </div>
+                            <div class="bg-white dark:bg-surface-dark p-4 rounded-xl">
+                                <p class="text-text-secondary text-sm">Reviewed</p>
+                                <p id="statReviewed" class="text-2xl font-bold text-green-500">-</p>
+                            </div>
+                        </div>
+                        
+                        <div class="space-y-3">
+                            <button onclick="router.navigate('upload')" class="w-full flex items-center gap-4 p-4 bg-white dark:bg-surface-dark rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700">
+                                <span class="material-symbols-outlined text-primary">upload_file</span>
+                                <div class="text-left"><p class="font-bold">Upload CSV</p><p class="text-sm text-text-secondary">Import bank statement</p></div>
+                            </button>
+                            <button onclick="router.navigate('files')" class="w-full flex items-center gap-4 p-4 bg-white dark:bg-surface-dark rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700">
+                                <span class="material-symbols-outlined text-primary">folder</span>
+                                <div class="text-left"><p class="font-bold">View Files</p><p class="text-sm text-text-secondary">Manage uploaded files</p></div>
+                            </button>
+                            <button onclick="router.navigate('addExpense')" class="w-full flex items-center gap-4 p-4 bg-white dark:bg-surface-dark rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700">
+                                <span class="material-symbols-outlined text-primary">add_circle</span>
+                                <div class="text-left"><p class="font-bold">Add Expense</p><p class="text-sm text-text-secondary">Manual entry</p></div>
+                            </button>
+                        </div>
+                    </main>
+                </div>`;
+            },
+            async initHome() {
+                try {
+                    const data = await api.getTables();
+                    const statements = data.tables.find(t => t.name === 'credit_card_statements');
+                    if (statements) {
+                        document.getElementById('statPending').textContent = statements.pending || 0;
+                        document.getElementById('statReviewed').textContent = statements.reviewed || 0;
+                    }
+                } catch (e) { console.error(e); }
+            },
+
+            // Upload Screen
+            upload() {
+                return `
+                <div class="flex flex-col min-h-screen">
+                    <header class="flex items-center p-4 border-b border-gray-200 dark:border-border-dark">
+                        <button onclick="router.navigate('home')" class="p-2 -ml-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700">
+                            <span class="material-symbols-outlined">arrow_back</span>
+                        </button>
+                        <h1 class="text-lg font-bold ml-2">Upload CSV</h1>
+                    </header>
+                    <main class="flex-1 p-4 space-y-4">
+                        <div class="space-y-4">
+                            <div>
+                                <label class="block text-sm font-medium mb-2">Account Type</label>
+                                <select id="accountType" class="w-full h-12 px-4 rounded-lg border border-gray-300 dark:border-border-dark bg-white dark:bg-surface-dark">
+                                    <option value="Credit Card">Credit Card</option>
+                                    <option value="Savings">Savings Account</option>
+                                    <option value="Current">Current Account</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium mb-2">Account Name/Number</label>
+                                <input id="accountName" type="text" placeholder="e.g. HDFC 1234" class="w-full h-12 px-4 rounded-lg border border-gray-300 dark:border-border-dark bg-white dark:bg-surface-dark" />
+                            </div>
+                        </div>
+                        
+                        <div id="dropZone" class="flex flex-col items-center gap-4 rounded-xl border-2 border-dashed border-gray-300 dark:border-border-dark p-8 cursor-pointer hover:border-primary">
+                            <span class="material-symbols-outlined text-4xl text-primary">cloud_upload</span>
+                            <p class="font-bold">Upload CSV File</p>
+                            <p class="text-sm text-text-secondary text-center">Tap to browse or drag file here</p>
+                            <input type="file" id="fileInput" accept=".csv" class="hidden" />
+                        </div>
+                        
+                        <div id="uploadProgress" class="hidden bg-white dark:bg-surface-dark p-4 rounded-xl">
+                            <div class="flex items-center gap-4">
+                                <div class="size-8 border-2 border-primary/30 border-t-primary rounded-full animate-spin"></div>
+                                <div>
+                                    <p class="font-bold">Uploading...</p>
+                                    <p id="uploadFileName" class="text-sm text-text-secondary"></p>
+                                </div>
+                            </div>
+                        </div>
+                    </main>
+                </div>`;
+            },
+            initUpload() {
+                const dropZone = document.getElementById('dropZone');
+                const fileInput = document.getElementById('fileInput');
+
+                dropZone.onclick = () => fileInput.click();
+                dropZone.ondragover = (e) => { e.preventDefault(); dropZone.classList.add('border-primary'); };
+                dropZone.ondragleave = () => dropZone.classList.remove('border-primary');
+                dropZone.ondrop = (e) => { e.preventDefault(); dropZone.classList.remove('border-primary'); if (e.dataTransfer.files[0]) this.handleUpload(e.dataTransfer.files[0]); };
+                fileInput.onchange = (e) => { if (e.target.files[0]) this.handleUpload(e.target.files[0]); };
+            },
+            async handleUpload(file) {
+                const progress = document.getElementById('uploadProgress');
+                const dropZone = document.getElementById('dropZone');
+                const accountType = document.getElementById('accountType').value;
+                const accountName = document.getElementById('accountName').value;
+
+                document.getElementById('uploadFileName').textContent = file.name;
+                dropZone.classList.add('hidden');
+                progress.classList.remove('hidden');
+
+                try {
+                    const result = await api.uploadCSV(file, accountType, accountName);
+                    if (result.success) {
+                        alert(`Uploaded ${result.rows_inserted} rows successfully!`);
+                        router.navigate('files');
+                    } else {
+                        alert('Upload failed: ' + (result.detail || 'Unknown error'));
+                        dropZone.classList.remove('hidden');
+                        progress.classList.add('hidden');
+                    }
+                } catch (e) {
+                    alert('Upload failed: ' + e.message);
+                    dropZone.classList.remove('hidden');
+                    progress.classList.add('hidden');
+                }
+            },
+
+            // Files List Screen
+            files() {
+                return `
+                <div class="flex flex-col min-h-screen">
+                    <header class="flex items-center p-4 border-b border-gray-200 dark:border-border-dark">
+                        <button onclick="router.navigate('home')" class="p-2 -ml-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700">
+                            <span class="material-symbols-outlined">arrow_back</span>
+                        </button>
+                        <h1 class="text-lg font-bold ml-2">Uploaded Files</h1>
+                    </header>
+                    <main id="filesList" class="flex-1 p-4 space-y-3">
+                        <div class="flex justify-center py-8"><div class="size-8 border-2 border-primary/30 border-t-primary rounded-full animate-spin"></div></div>
+                    </main>
+                </div>`;
+            },
+            async initFiles() {
+                const list = document.getElementById('filesList');
+                try {
+                    const data = await api.getUploadedFiles();
+                    if (data.files.length === 0) {
+                        list.innerHTML = '<p class="text-center text-text-secondary py-8">No files uploaded yet</p>';
+                        return;
+                    }
+                    list.innerHTML = data.files.map(f => `
+                        <div class="bg-white dark:bg-surface-dark p-4 rounded-xl">
+                            <div class="flex justify-between items-start mb-2">
+                                <div class="flex-1 min-w-0">
+                                    <p class="font-bold truncate">${f.filename}</p>
+                                    <p class="text-sm text-text-secondary">${f.account_type || 'N/A'} • ${f.account_name || 'N/A'}</p>
+                                </div>
+                                <button onclick="screens.deleteFile('${f.filename.replace(/'/g, "\\'")}')" class="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-full">
+                                    <span class="material-symbols-outlined">delete</span>
+                                </button>
+                            </div>
+                            <div class="flex items-center gap-4 text-sm">
+                                <span class="text-yellow-500">${f.pending_count} pending</span>
+                                <span class="text-green-500">${f.reviewed_count} reviewed</span>
+                            </div>
+                            <button onclick="selectedFile='${f.filename.replace(/'/g, "\\'")}'; router.navigate('list')" class="mt-3 w-full h-10 bg-primary text-white font-bold rounded-lg">
+                                View Transactions
+                            </button>
+                        </div>
+                    `).join('');
+                } catch (e) {
+                    list.innerHTML = '<p class="text-center text-red-500 py-8">Failed to load files</p>';
+                }
+            },
+            async deleteFile(filename) {
+                if (!confirm(`Delete all records for "${filename}"?`)) return;
+                try {
+                    const result = await api.deleteFile(filename);
+                    if (result.success) {
+                        alert(result.message);
+                        this.initFiles();
+                    } else {
+                        alert('Delete failed: ' + (result.detail || 'Unknown error'));
+                    }
+                } catch (e) { alert('Delete failed: ' + e.message); }
+            },
+
+            // Transaction List Screen
+            list() {
+                return `
+                <div class="flex flex-col min-h-screen">
+                    <header class="sticky top-0 z-10 bg-background-light dark:bg-background-dark border-b border-gray-200 dark:border-border-dark">
+                        <div class="flex items-center p-4">
+                            <button onclick="router.navigate('files')" class="p-2 -ml-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700">
+                                <span class="material-symbols-outlined">arrow_back</span>
+                            </button>
+                            <div class="ml-2 flex-1 min-w-0">
+                                <h1 class="text-lg font-bold truncate">${selectedFile || 'All Transactions'}</h1>
+                            </div>
+                        </div>
+                        <div class="flex gap-2 px-4 pb-3 overflow-x-auto no-scrollbar">
+                            <button data-filter="" class="filter-chip active shrink-0 h-8 px-4 rounded-full bg-primary text-white text-sm font-bold">All</button>
+                            <button data-filter="pending" class="filter-chip shrink-0 h-8 px-4 rounded-full bg-white dark:bg-surface-dark border border-gray-200 dark:border-gray-700 text-sm">Pending</button>
+                            <button data-filter="reviewed" class="filter-chip shrink-0 h-8 px-4 rounded-full bg-white dark:bg-surface-dark border border-gray-200 dark:border-gray-700 text-sm">Reviewed</button>
+                        </div>
+                    </header>
+                    <main id="statementsList" class="flex-1 p-4 space-y-3">
+                        <div class="flex justify-center py-8"><div class="size-8 border-2 border-primary/30 border-t-primary rounded-full animate-spin"></div></div>
+                    </main>
+                </div>`;
+            },
+            async initList() {
+                document.querySelectorAll('.filter-chip').forEach(chip => {
+                    chip.onclick = () => {
+                        document.querySelectorAll('.filter-chip').forEach(c => {
+                            c.classList.remove('active', 'bg-primary', 'text-white');
+                            c.classList.add('bg-white', 'dark:bg-surface-dark', 'border');
+                        });
+                        chip.classList.add('active', 'bg-primary', 'text-white');
+                        chip.classList.remove('bg-white', 'dark:bg-surface-dark', 'border');
+                        this.loadStatements(chip.dataset.filter);
+                    };
+                });
+                await this.loadStatements();
+            },
+            async loadStatements(statusFilter = null) {
+                const list = document.getElementById('statementsList');
+                list.innerHTML = '<div class="flex justify-center py-8"><div class="size-8 border-2 border-primary/30 border-t-primary rounded-full animate-spin"></div></div>';
+                try {
+                    const data = await api.getStatements(statusFilter, selectedFile);
+                    if (data.data.length === 0) {
+                        list.innerHTML = '<p class="text-center text-text-secondary py-8">No transactions found</p>';
+                        return;
+                    }
+                    list.innerHTML = data.data.map(s => `
+                        <div onclick="router.navigate('details', {id: ${s.id}})" class="bg-white dark:bg-surface-dark p-4 rounded-xl cursor-pointer hover:shadow-md transition-shadow">
+                            <div class="flex justify-between items-start">
+                                <div class="flex-1 min-w-0 mr-3">
+                                    <p class="font-bold truncate">${s.transaction_details || 'Transaction'}</p>
+                                    <p class="text-sm text-text-secondary">₹${(s.amount_inr || 0).toLocaleString()}</p>
+                                </div>
+                                <div class="text-right shrink-0">
+                                    <span class="px-2 py-1 rounded text-xs font-bold ${s.review_status === 'reviewed' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' : 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400'}">${s.review_status}</span>
+                                    <p class="text-xs text-gray-400 mt-1">${s.date || ''}</p>
+                                </div>
+                            </div>
+                        </div>
+                    `).join('');
+                } catch (e) {
+                    list.innerHTML = '<p class="text-center text-red-500 py-8">Failed to load</p>';
+                }
+            },
+
+            // Details/Approve Screen
+            details(id) {
+                return `
+                <div class="flex flex-col min-h-screen">
+                    <header class="flex items-center p-4 border-b border-gray-200 dark:border-border-dark">
+                        <button onclick="router.navigate('list')" class="p-2 -ml-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700">
+                            <span class="material-symbols-outlined">arrow_back</span>
+                        </button>
+                        <h1 class="text-lg font-bold ml-2">Transaction Details</h1>
+                    </header>
+                    <main id="detailsContent" class="flex-1 p-4 pb-32">
+                        <div class="flex justify-center py-8"><div class="size-8 border-2 border-primary/30 border-t-primary rounded-full animate-spin"></div></div>
+                    </main>
+                    <footer id="detailsFooter" class="fixed bottom-0 left-0 right-0 p-4 pb-8 bg-background-light dark:bg-background-dark border-t border-gray-200 dark:border-border-dark hidden">
+                        <button id="approveBtn" class="w-full h-12 bg-primary text-white font-bold rounded-xl flex items-center justify-center gap-2">
+                            <span class="material-symbols-outlined">check</span> Approve
+                        </button>
+                    </footer>
+                </div>`;
+            },
+            async initDetails(id) {
+                const content = document.getElementById('detailsContent');
+                const footer = document.getElementById('detailsFooter');
+                try {
+                    const s = await api.getStatement(id);
+                    const isPending = s.review_status !== 'reviewed';
+
+                    content.innerHTML = `
+                        <div class="space-y-4">
+                            <div class="bg-white dark:bg-surface-dark p-4 rounded-xl">
+                                <h3 class="text-sm font-bold text-text-secondary mb-3">Statement Info</h3>
+                                <div class="space-y-2 text-sm">
+                                    <div class="flex justify-between"><span class="text-text-secondary">Date</span><span>${s.date || '-'}</span></div>
+                                    <div class="flex justify-between"><span class="text-text-secondary">Amount</span><span class="font-bold">₹${(s.amount_inr || 0).toLocaleString()}</span></div>
+                                    <div class="flex justify-between"><span class="text-text-secondary">Type</span><span>${s.billing_sign === 'CR' ? 'Credit' : 'Debit'}</span></div>
+                                    <div><span class="text-text-secondary">Details</span><p class="mt-1">${s.transaction_details || '-'}</p></div>
+                                </div>
+                            </div>
+                            
+                            ${isPending ? `
+                            <div class="bg-white dark:bg-surface-dark p-4 rounded-xl space-y-4">
+                                <h3 class="text-sm font-bold text-text-secondary">Create Expense</h3>
+                                <div class="grid grid-cols-2 gap-3">
+                                    <div>
+                                        <label class="text-xs text-text-secondary">Date</label>
+                                        <input id="expTime" type="date" class="w-full h-10 px-3 mt-1 rounded-lg border border-gray-300 dark:border-border-dark bg-white dark:bg-surface-dark text-sm" value="${s.date ? s.date.split('/').reverse().join('-') : new Date().toISOString().split('T')[0]}" />
+                                    </div>
+                                    <div>
+                                        <label class="text-xs text-text-secondary">Type</label>
+                                        <select id="expType" class="w-full h-10 px-3 mt-1 rounded-lg border border-gray-300 dark:border-border-dark bg-white dark:bg-surface-dark text-sm">
+                                            <option value="(-) Expense" ${s.billing_sign !== 'CR' ? 'selected' : ''}>Expense</option>
+                                            <option value="(+) Income" ${s.billing_sign === 'CR' ? 'selected' : ''}>Income</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label class="text-xs text-text-secondary">Amount</label>
+                                        <input id="expAmount" type="number" step="0.01" class="w-full h-10 px-3 mt-1 rounded-lg border border-gray-300 dark:border-border-dark bg-white dark:bg-surface-dark text-sm" value="${s.amount_inr || 0}" />
+                                    </div>
+                                    <div>
+                                        <label class="text-xs text-text-secondary">Category</label>
+                                        <select id="expCategory" class="w-full h-10 px-3 mt-1 rounded-lg border border-gray-300 dark:border-border-dark bg-white dark:bg-surface-dark text-sm">
+                                            <option>Food</option><option>Grocery</option><option>Shopping</option><option>Transport</option><option>Entertainment</option><option>Bills</option><option>Other</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div>
+                                    <label class="text-xs text-text-secondary">Account</label>
+                                    <input id="expAccount" type="text" class="w-full h-10 px-3 mt-1 rounded-lg border border-gray-300 dark:border-border-dark bg-white dark:bg-surface-dark text-sm" value="${s.account_name || 'Credit Card'}" />
+                                </div>
+                                <div>
+                                    <label class="text-xs text-text-secondary">Notes</label>
+                                    <textarea id="expNotes" class="w-full h-16 p-3 mt-1 rounded-lg border border-gray-300 dark:border-border-dark bg-white dark:bg-surface-dark text-sm resize-none">${s.transaction_details || ''}</textarea>
+                                </div>
+                            </div>` : '<p class="text-center text-green-500 py-4">✓ Already reviewed</p>'}
+                        </div>
+                    `;
+
+                    if (isPending) {
+                        footer.classList.remove('hidden');
+                        document.getElementById('approveBtn').onclick = async () => {
+                            const data = {
+                                time: document.getElementById('expTime').value,
+                                type: document.getElementById('expType').value,
+                                amount: parseFloat(document.getElementById('expAmount').value) || 0,
+                                category: document.getElementById('expCategory').value,
+                                account: document.getElementById('expAccount').value,
+                                notes: document.getElementById('expNotes').value
+                            };
+                            try {
+                                const result = await api.approveStatement(id, data);
+                                if (result.success) router.navigate('list');
+                                else alert('Failed: ' + (result.detail || 'Unknown error'));
+                            } catch (e) { alert('Failed: ' + e.message); }
+                        };
+                    }
+                } catch (e) {
+                    content.innerHTML = '<p class="text-center text-red-500 py-8">Failed to load</p>';
+                }
+            },
+
+            // Add Manual Expense Screen
+            addExpense() {
+                return `
+                <div class="flex flex-col min-h-screen">
+                    <header class="flex items-center p-4 border-b border-gray-200 dark:border-border-dark">
+                        <button onclick="router.navigate('home')" class="p-2 -ml-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700">
+                            <span class="material-symbols-outlined">arrow_back</span>
+                        </button>
+                        <h1 class="text-lg font-bold ml-2">Add Expense</h1>
+                    </header>
+                    <main class="flex-1 p-4 space-y-4">
+                        <div class="grid grid-cols-2 gap-3">
+                            <div>
+                                <label class="text-sm font-medium">Date</label>
+                                <input id="manualTime" type="date" class="w-full h-12 px-4 mt-1 rounded-lg border border-gray-300 dark:border-border-dark bg-white dark:bg-surface-dark" value="${new Date().toISOString().split('T')[0]}" />
+                            </div>
+                            <div>
+                                <label class="text-sm font-medium">Type</label>
+                                <select id="manualType" class="w-full h-12 px-4 mt-1 rounded-lg border border-gray-300 dark:border-border-dark bg-white dark:bg-surface-dark">
+                                    <option value="(-) Expense">Expense</option>
+                                    <option value="(+) Income">Income</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div>
+                            <label class="text-sm font-medium">Amount</label>
+                            <input id="manualAmount" type="number" step="0.01" placeholder="0.00" class="w-full h-12 px-4 mt-1 rounded-lg border border-gray-300 dark:border-border-dark bg-white dark:bg-surface-dark" />
+                        </div>
+                        <div class="grid grid-cols-2 gap-3">
+                            <div>
+                                <label class="text-sm font-medium">Category</label>
+                                <select id="manualCategory" class="w-full h-12 px-4 mt-1 rounded-lg border border-gray-300 dark:border-border-dark bg-white dark:bg-surface-dark">
+                                    <option>Food</option><option>Grocery</option><option>Shopping</option><option>Transport</option><option>Entertainment</option><option>Bills</option><option>Other</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="text-sm font-medium">Account</label>
+                                <input id="manualAccount" type="text" placeholder="Cash, Bank..." class="w-full h-12 px-4 mt-1 rounded-lg border border-gray-300 dark:border-border-dark bg-white dark:bg-surface-dark" />
+                            </div>
+                        </div>
+                        <div>
+                            <label class="text-sm font-medium">Notes</label>
+                            <textarea id="manualNotes" class="w-full h-20 p-4 mt-1 rounded-lg border border-gray-300 dark:border-border-dark bg-white dark:bg-surface-dark resize-none" placeholder="Optional notes..."></textarea>
+                        </div>
+                    </main>
+                    <footer class="p-4 pb-8">
+                        <button id="saveExpenseBtn" class="w-full h-12 bg-primary text-white font-bold rounded-xl flex items-center justify-center gap-2">
+                            <span class="material-symbols-outlined">save</span> Save Expense
+                        </button>
+                    </footer>
+                </div>`;
+            },
+            initAddExpense() {
+                document.getElementById('saveExpenseBtn').onclick = async () => {
+                    const data = {
+                        time: document.getElementById('manualTime').value,
+                        type: document.getElementById('manualType').value,
+                        amount: parseFloat(document.getElementById('manualAmount').value) || 0,
+                        category: document.getElementById('manualCategory').value,
+                        account: document.getElementById('manualAccount').value,
+                        notes: document.getElementById('manualNotes').value
+                    };
+                    if (!data.amount) { alert('Please enter amount'); return; }
+                    try {
+                        const result = await api.createExpense(data);
+                        if (result.success) { alert('Expense saved!'); router.navigate('home'); }
+                        else alert('Failed: ' + (result.detail || 'Unknown error'));
+                    } catch (e) { alert('Failed: ' + e.message); }
+                };
+            },
+
+            // Settings Screen
+            settings() {
+                return `
+                <div class="flex flex-col min-h-screen">
+                    <header class="flex items-center p-4 border-b border-gray-200 dark:border-border-dark">
+                        <button onclick="router.navigate('home')" class="p-2 -ml-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700">
+                            <span class="material-symbols-outlined">arrow_back</span>
+                        </button>
+                        <h1 class="text-lg font-bold ml-2">Settings</h1>
+                    </header>
+                    <main class="flex-1 p-4 space-y-4">
+                        <div class="bg-white dark:bg-surface-dark p-4 rounded-xl">
+                            <h3 class="font-bold mb-3">Export Expenses</h3>
+                            <div class="grid grid-cols-2 gap-3 mb-3">
+                                <div>
+                                    <label class="text-xs text-text-secondary">Start Date</label>
+                                    <input id="exportStart" type="date" class="w-full h-10 px-3 mt-1 rounded-lg border border-gray-300 dark:border-border-dark bg-white dark:bg-surface-dark text-sm" />
+                                </div>
+                                <div>
+                                    <label class="text-xs text-text-secondary">End Date</label>
+                                    <input id="exportEnd" type="date" class="w-full h-10 px-3 mt-1 rounded-lg border border-gray-300 dark:border-border-dark bg-white dark:bg-surface-dark text-sm" />
+                                </div>
+                            </div>
+                            <button id="exportBtn" class="w-full h-10 bg-green-500 text-white font-bold rounded-lg flex items-center justify-center gap-2">
+                                <span class="material-symbols-outlined text-lg">download</span> Download CSV
+                            </button>
+                        </div>
+                        
+                        <div class="bg-white dark:bg-surface-dark p-4 rounded-xl">
+                            <h3 class="font-bold mb-3 text-red-500">Danger Zone</h3>
+                            <div class="space-y-2">
+                                <button id="clearStatementsBtn" class="w-full h-10 bg-red-100 dark:bg-red-900/30 text-red-600 font-bold rounded-lg">Clear All Statements</button>
+                                <button id="clearExpensesBtn" class="w-full h-10 bg-red-100 dark:bg-red-900/30 text-red-600 font-bold rounded-lg">Clear All Expenses</button>
+                            </div>
+                        </div>
+                    </main>
+                </div>`;
+            },
+            initSettings() {
+                document.getElementById('exportBtn').onclick = () => {
+                    const start = document.getElementById('exportStart').value;
+                    const end = document.getElementById('exportEnd').value;
+                    api.exportExpenses(start, end);
+                };
+                document.getElementById('clearStatementsBtn').onclick = async () => {
+                    if (!confirm('Delete ALL statement records? This cannot be undone.')) return;
+                    try {
+                        const result = await api.clearTable('credit_card_statements');
+                        alert(result.message);
+                    } catch (e) { alert('Failed: ' + e.message); }
+                };
+                document.getElementById('clearExpensesBtn').onclick = async () => {
+                    if (!confirm('Delete ALL expense records? This cannot be undone.')) return;
+                    try {
+                        const result = await api.clearTable('expenses');
+                        alert(result.message);
+                    } catch (e) { alert('Failed: ' + e.message); }
+                };
+            }
+        };
+
+        router.render();
+    </script>
+</body>
+
+</html>

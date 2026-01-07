@@ -1,0 +1,15 @@
+app/__pycache__/__init__.cpython-312.pyc
+app/__pycache__/config.cpython-312.pyc
+app/__pycache__/database.cpython-312.pyc
+app/__pycache__/main.cpython-312.pyc
+app/__pycache__/models.cpython-312.pyc
+app/__pycache__/schemas.cpython-312.pyc
+app/data/3005_statement.csv
+app/data/sample_converted.csv
+app/routers/__pycache__/__init__.cpython-312.pyc
+app/routers/__pycache__/csv_upload.cpython-312.pyc
+app/services/__pycache__/__init__.cpython-312.pyc
+app/services/__pycache__/csv_service.cpython-312.pyc
+data/3005_statement.csv
+data/sample_converted.csv
+expense_calculator.db
