@@ -13,3 +13,13 @@ app/services/__pycache__/csv_service.cpython-312.pyc
 data/3005_statement.csv
 data/sample_converted.csv
 expense_calculator.db
+app/__pycache__/__init__.cpython-310.pyc
+app/__pycache__/config.cpython-310.pyc
+app/__pycache__/database.cpython-310.pyc
+app/__pycache__/main.cpython-310.pyc
+app/__pycache__/models.cpython-310.pyc
+app/__pycache__/schemas.cpython-310.pyc
+app/routers/__pycache__/__init__.cpython-310.pyc
+app/routers/__pycache__/csv_upload.cpython-310.pyc
+app/services/__pycache__/__init__.cpython-310.pyc
+app/services/__pycache__/csv_service.cpython-310.pyc

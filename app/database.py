@@ -36,18 +36,76 @@ def init_db():
 
 
 def migrate_db():
-    """Add missing columns to existing tables."""
+    """Migrate from old schema to new transactions schema."""
     with engine.connect() as conn:
-        # Check and add account_type column
-        try:
-            conn.execute(text("SELECT account_type FROM credit_card_statements LIMIT 1"))
-        except Exception:
-            conn.execute(text("ALTER TABLE credit_card_statements ADD COLUMN account_type VARCHAR(50)"))
-            conn.commit()
+        # Check if old credit_card_statements table exists
+        result = conn.execute(text(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='credit_card_statements'"
+        ))
+        old_table_exists = result.fetchone() is not None
         
-        # Check and add account_name column
-        try:
-            conn.execute(text("SELECT account_name FROM credit_card_statements LIMIT 1"))
-        except Exception:
-            conn.execute(text("ALTER TABLE credit_card_statements ADD COLUMN account_name VARCHAR(100)"))
-            conn.commit()
+        # Check if new transactions table exists
+        result = conn.execute(text(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='transactions'"
+        ))
+        new_table_exists = result.fetchone() is not None
+        
+        if old_table_exists and not new_table_exists:
+            print("Migrating from credit_card_statements to transactions schema...")
+            
+            # Create new transactions table (will be created by Base.metadata.create_all)
+            # But we need to migrate data first, so create it manually
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS transactions (
+                    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    Date VARCHAR(50),
+                    Details VARCHAR(500),
+                    Debit FLOAT,
+                    Credit FLOAT,
+                    Account_name VARCHAR(100),
+                    filename VARCHAR(255),
+                    review_status VARCHAR(20) DEFAULT 'pending',
+                    review_datetime DATETIME,
+                    uploaded_datetime DATETIME,
+                    Category VARCHAR(100),
+                    Notes VARCHAR(500)
+                )
+            """))
+            
+            # Migrate data from old table to new table
+            # Convert amount_inr + billing_sign to Debit/Credit
+            conn.execute(text("""
+                INSERT INTO transactions (
+                    Date, Details, Debit, Credit, Account_name, filename,
+                    review_status, review_datetime, uploaded_datetime
+                )
+                SELECT 
+                    date,
+                    transaction_details,
+                    CASE WHEN billing_sign != 'CR' OR billing_sign IS NULL 
+                         THEN ABS(amount_inr) ELSE NULL END as Debit,
+                    CASE WHEN billing_sign = 'CR' 
+                         THEN ABS(amount_inr) ELSE NULL END as Credit,
+                    account_name,
+                    filename,
+                    review_status,
+                    reviewed_datetime,
+                    uploaded_datetime
+                FROM credit_card_statements
+            """))
+            
+            # Drop old table
+            conn.execute(text("DROP TABLE credit_card_statements"))
+            
+            print("Migration completed: credit_card_statements -> transactions")
+        
+        # Drop expenses table if it exists
+        result = conn.execute(text(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='expenses'"
+        ))
+        if result.fetchone() is not None:
+            print("Dropping expenses table...")
+            conn.execute(text("DROP TABLE expenses"))
+            print("Expenses table dropped")
+        
+        conn.commit()

@@ -1,0 +1,356 @@
+import { database, Transaction as DBTransaction, ReviewStatus } from '../database/database';
+import { processCSV, readCSVFile, calculateFileHash } from '../utils/csvProcessor';
+
+// Types matching the backend models (keep for compatibility)
+export interface Transaction {
+    Id: number;
+    Date: string | null;
+    Details: string | null;
+    Debit: number | null;
+    Credit: number | null;
+    Account_name: string | null;
+    Account_type: string | null;
+    filename: string;
+    review_status: string;
+    review_datetime: string | null;
+    uploaded_datetime: string | null;
+    Category: string | null;
+    Notes: string | null;
+}
+
+export interface UploadedFile {
+    filename: string;
+    record_count: number;
+    pending_count: number;
+    reviewed_count: number;
+    account_name: string | null;
+    uploaded_at: string | null;
+}
+
+export interface TableInfo {
+    name: string;
+    total: number;
+    pending?: number;
+    reviewed?: number;
+}
+
+// API Response types
+interface ApiResponse<T> {
+    success?: boolean;
+    data?: T;
+    error?: string;
+    detail?: string;
+}
+
+class ApiClient {
+    private initialized: boolean = false;
+
+    /**
+     * Initialize the database
+     */
+    async init(): Promise<void> {
+        if (!this.initialized) {
+            await database.init();
+            this.initialized = true;
+            console.log('Offline database initialized');
+        }
+    }
+
+    /**
+     * Ensure database is initialized before operations
+     */
+    private async ensureInit(): Promise<void> {
+        if (!this.initialized) {
+            await this.init();
+        }
+    }
+
+    /**
+     * Upload CSV file (now processes locally)
+     */
+    async uploadCSV(
+        fileUri: string,
+        fileName: string,
+        accountName?: string,
+        forceUpload: boolean = false
+    ): Promise<{
+        success: boolean;
+        rows_inserted?: number;
+        message?: string;
+        isDuplicate?: boolean;
+        duplicateInfo?: {
+            uploadDate: string;
+            transactionCount: number;
+        };
+    }> {
+        try {
+            await this.ensureInit();
+
+            // Read CSV file content
+            const csvContent = await readCSVFile(fileUri);
+
+            // Calculate hash for duplicate detection
+            const fileHash = await calculateFileHash(csvContent);
+
+            // Check for duplicates (BOTH filename and hash must match)
+            if (!forceUpload) {
+                const existingHashRequest = await database.checkFileExists(fileHash);
+                const existingFilenameRequest = await database.getFileByFilename(fileName);
+
+                // Check if we have a record that matches both
+                // We check if the record found by hash has the same filename
+                if (existingHashRequest && existingHashRequest.filename === fileName) {
+                    return {
+                        success: false,
+                        message: 'Duplicate file detected',
+                        isDuplicate: true,
+                        duplicateInfo: {
+                            uploadDate: existingHashRequest.upload_datetime,
+                            transactionCount: existingHashRequest.transaction_count
+                        }
+                    };
+                }
+            }
+
+            // Process CSV
+            const result = await processCSV(csvContent, fileName, accountName);
+
+            // Insert transactions into local database
+            const insertedIds = await database.insertTransactions(result.transactions);
+            const insertedCount = insertedIds.length;
+
+            // Record the uploaded file
+            await database.insertUploadedFile(fileName, fileHash, insertedCount);
+
+            let message = `Successfully uploaded ${insertedCount} rows`;
+            if (result.formatConverted) {
+                message += ' (CSV format was converted)';
+            }
+
+            return {
+                success: true,
+                rows_inserted: insertedCount,
+                message,
+            };
+        } catch (error: any) {
+            console.error('Upload CSV error:', error);
+            return {
+                success: false,
+                message: error.message || 'Failed to upload CSV',
+            };
+        }
+    }
+
+    /**
+     * Get tables with stats
+     */
+    async getTables(): Promise<{ tables: TableInfo[] }> {
+        await this.ensureInit();
+
+        const stats = await database.getTransactionStats();
+
+        return {
+            tables: [
+                {
+                    name: 'transactions',
+                    description: 'Transaction records',
+                    total: stats.total,
+                    pending: stats.pending,
+                    reviewed: stats.reviewed,
+                    uploadable: true,
+                } as any,
+            ],
+        };
+    }
+
+    /**
+     * Get uploaded files
+     */
+    async getUploadedFiles(): Promise<{ files: UploadedFile[] }> {
+        await this.ensureInit();
+
+        const files = await database.getUploadedFiles();
+
+        return {
+            files: files.map(f => ({
+                filename: f.filename,
+                record_count: f.record_count,
+                pending_count: f.pending_count,
+                reviewed_count: f.reviewed_count,
+                account_name: null,
+                uploaded_at: f.uploaded_at,
+            })),
+        };
+    }
+
+    /**
+     * Delete file records
+     */
+    async deleteFile(filename: string): Promise<{ success: boolean; message: string }> {
+        await this.ensureInit();
+
+        const count = await database.deleteTransactionsByFilename(filename);
+
+        if (count === 0) {
+            return {
+                success: false,
+                message: `No records found for file '${filename}'`,
+            };
+        }
+
+        return {
+            success: true,
+            message: `Deleted ${count} records for file '${filename}'`,
+        };
+    }
+
+    /**
+     * Get transactions
+     */
+    async deleteTransaction(id: number): Promise<{ success: boolean; message: string }> {
+        await this.ensureInit();
+        await database.deleteTransaction(id);
+        return { success: true, message: 'Transaction deleted' };
+    }
+
+    /**
+     * Get transactions
+     */
+    async getTransactions(
+        statusFilter?: string,
+        filenameFilter?: string,
+        accountName?: string,
+        accountType?: string,
+        limit: number = 500
+    ): Promise<{ data: Transaction[]; total: number }> {
+        await this.ensureInit();
+
+        const transactions = await database.getTransactions(
+            statusFilter,
+            filenameFilter,
+            accountName,
+            accountType,
+            limit
+        );
+
+        return {
+            data: transactions as Transaction[],
+            total: transactions.length,
+        };
+    }
+
+    async getFilterOptions(): Promise<{ accountNames: string[]; accountTypes: string[] }> {
+        await this.ensureInit();
+        return await database.getFilterOptions();
+    }
+
+    /**
+     * Get single transaction
+     */
+    async getTransaction(id: number): Promise<Transaction> {
+        await this.ensureInit();
+
+        const transaction = await database.getTransaction(id);
+
+        if (!transaction) {
+            throw new Error('Transaction not found');
+        }
+
+        return transaction as Transaction;
+    }
+
+    /**
+     * Review transaction
+     */
+    async reviewTransaction(
+        id: number,
+        reviewData: {
+            Category: string;
+            Notes?: string;
+        }
+    ): Promise<{ success: boolean; transaction?: Transaction }> {
+        await this.ensureInit();
+
+        await database.reviewTransaction(id, reviewData.Category, reviewData.Notes);
+
+        const transaction = await database.getTransaction(id);
+
+        return {
+            success: true,
+            transaction: transaction as Transaction,
+        };
+    }
+
+    /**
+     * Create transaction manually
+     */
+    async createTransaction(data: {
+        Date?: string;
+        Details: string;
+        Debit?: number;
+        Credit?: number;
+        Account_name: string;
+        Account_type?: string;
+        Category?: string;
+        Notes?: string;
+    }): Promise<{ success: boolean; transaction?: Transaction }> {
+        await this.ensureInit();
+
+        const transaction: DBTransaction = {
+            Date: data.Date || new Date().toISOString().split('T')[0],
+            Details: data.Details,
+            Debit: data.Debit || null,
+            Credit: data.Credit || null,
+            Account_name: data.Account_name,
+            Account_type: data.Account_type || 'Manual',
+            filename: 'manual_entry',
+            Category: data.Category || null,
+            Notes: data.Notes || null,
+            review_status: data.Category ? ReviewStatus.REVIEWED : ReviewStatus.PENDING,
+            review_datetime: data.Category ? new Date().toISOString() : null,
+            uploaded_datetime: new Date().toISOString(),
+        };
+
+        const id = await database.insertTransaction(transaction);
+        const createdTransaction = await database.getTransaction(id);
+
+        return {
+            success: true,
+            transaction: createdTransaction as Transaction,
+        };
+    }
+
+    /**
+     * Clear table
+     */
+    async clearTable(tableName: string): Promise<{ success: boolean; message: string }> {
+        await this.ensureInit();
+
+        if (tableName === 'transactions') {
+            const count = await database.clearAllTransactions();
+            return {
+                success: true,
+                message: `Deleted ${count} records from transactions`,
+            };
+        } else {
+            return {
+                success: false,
+                message: `Table '${tableName}' not found`,
+            };
+        }
+    }
+
+    /**
+     * Export all transactions (for backup)
+     */
+    async exportTransactions(): Promise<Transaction[]> {
+        await this.ensureInit();
+        return (await database.exportAllTransactions()) as Transaction[];
+    }
+}
+
+// Export singleton instance
+export const api = new ApiClient();
+
+// Note: Database will be initialized lazily on first use via ensureInit()
+// This prevents multiple initializations and follows best practices

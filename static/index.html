@@ -62,31 +62,40 @@
         let selectedFile = null;
 
         const api = {
-            async uploadCSV(file, accountType, accountName) {
+            async uploadCSV(file, accountName) {
                 const formData = new FormData();
                 formData.append('file', file);
-                if (accountType) formData.append('account_type', accountType);
                 if (accountName) formData.append('account_name', accountName);
                 const res = await fetch(`${API_BASE}/upload-csv`, { method: 'POST', body: formData });
                 return res.json();
             },
-            async getStatements(status = null, filename = null) {
-                let url = `${API_BASE}/credit-card-statements?limit=500`;
+            async getTransactions(status = null, filename = null, accountName = null, accountType = null) {
+                let url = `${API_BASE}/transactions?limit=500`;
                 if (status) url += `&status_filter=${status}`;
                 if (filename) url += `&filename_filter=${encodeURIComponent(filename)}`;
+                if (accountName) url += `&account_name=${encodeURIComponent(accountName)}`;
+                if (accountType) url += `&account_type=${encodeURIComponent(accountType)}`;
                 const res = await fetch(url);
                 return res.json();
             },
-            async getStatement(id) {
-                const res = await fetch(`${API_BASE}/credit-card-statements/${id}`);
+            async getTransaction(id) {
+                const res = await fetch(`${API_BASE}/transactions/${id}`);
                 return res.json();
             },
-            async approveStatement(id, expenseData) {
-                const res = await fetch(`${API_BASE}/credit-card-statements/${id}/approve`, {
+            async reviewTransaction(id, reviewData) {
+                const res = await fetch(`${API_BASE}/transactions/${id}/review`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(expenseData)
+                    body: JSON.stringify(reviewData)
                 });
+                return res.json();
+            },
+            async deleteTransaction(id) {
+                const res = await fetch(`${API_BASE}/transactions/${id}`, { method: 'DELETE' });
+                return res.json();
+            },
+            async getFilterOptions() {
+                const res = await fetch(`${API_BASE}/filter-options`);
                 return res.json();
             },
             async getTables() {
@@ -105,19 +114,13 @@
                 const res = await fetch(`${API_BASE}/tables/${tableName}/clear`, { method: 'DELETE' });
                 return res.json();
             },
-            async createExpense(data) {
-                const res = await fetch(`${API_BASE}/expenses`, {
+            async createTransaction(data) {
+                const res = await fetch(`${API_BASE}/transactions`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(data)
                 });
                 return res.json();
-            },
-            exportExpenses(startDate, endDate) {
-                let url = `${API_BASE}/expenses/export?`;
-                if (startDate) url += `start_date=${startDate}&`;
-                if (endDate) url += `end_date=${endDate}`;
-                window.open(url, '_blank');
             }
         };
 
@@ -177,7 +180,7 @@
                             </button>
                             <button onclick="router.navigate('addExpense')" class="w-full flex items-center gap-4 p-4 bg-white dark:bg-surface-dark rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700">
                                 <span class="material-symbols-outlined text-primary">add_circle</span>
-                                <div class="text-left"><p class="font-bold">Add Expense</p><p class="text-sm text-text-secondary">Manual entry</p></div>
+                                <div class="text-left"><p class="font-bold">Add Transaction</p><p class="text-sm text-text-secondary">Manual entry</p></div>
                             </button>
                         </div>
                     </main>
@@ -186,10 +189,10 @@
             async initHome() {
                 try {
                     const data = await api.getTables();
-                    const statements = data.tables.find(t => t.name === 'credit_card_statements');
-                    if (statements) {
-                        document.getElementById('statPending').textContent = statements.pending || 0;
-                        document.getElementById('statReviewed').textContent = statements.reviewed || 0;
+                    const transactions = data.tables.find(t => t.name === 'transactions');
+                    if (transactions) {
+                        document.getElementById('statPending').textContent = transactions.pending || 0;
+                        document.getElementById('statReviewed').textContent = transactions.reviewed || 0;
                     }
                 } catch (e) { console.error(e); }
             },
@@ -205,19 +208,9 @@
                         <h1 class="text-lg font-bold ml-2">Upload CSV</h1>
                     </header>
                     <main class="flex-1 p-4 space-y-4">
-                        <div class="space-y-4">
-                            <div>
-                                <label class="block text-sm font-medium mb-2">Account Type</label>
-                                <select id="accountType" class="w-full h-12 px-4 rounded-lg border border-gray-300 dark:border-border-dark bg-white dark:bg-surface-dark">
-                                    <option value="Credit Card">Credit Card</option>
-                                    <option value="Savings">Savings Account</option>
-                                    <option value="Current">Current Account</option>
-                                </select>
-                            </div>
-                            <div>
-                                <label class="block text-sm font-medium mb-2">Account Name/Number</label>
-                                <input id="accountName" type="text" placeholder="e.g. HDFC 1234" class="w-full h-12 px-4 rounded-lg border border-gray-300 dark:border-border-dark bg-white dark:bg-surface-dark" />
-                            </div>
+                        <div>
+                            <label class="block text-sm font-medium mb-2">Account Name/Number</label>
+                            <input id="accountName" type="text" placeholder="e.g. HDFC 1234" class="w-full h-12 px-4 rounded-lg border border-gray-300 dark:border-border-dark bg-white dark:bg-surface-dark" />
                         </div>
                         
                         <div id="dropZone" class="flex flex-col items-center gap-4 rounded-xl border-2 border-dashed border-gray-300 dark:border-border-dark p-8 cursor-pointer hover:border-primary">
@@ -252,7 +245,6 @@
             async handleUpload(file) {
                 const progress = document.getElementById('uploadProgress');
                 const dropZone = document.getElementById('dropZone');
-                const accountType = document.getElementById('accountType').value;
                 const accountName = document.getElementById('accountName').value;
 
                 document.getElementById('uploadFileName').textContent = file.name;
@@ -260,7 +252,7 @@
                 progress.classList.remove('hidden');
 
                 try {
-                    const result = await api.uploadCSV(file, accountType, accountName);
+                    const result = await api.uploadCSV(file, accountName);
                     if (result.success) {
                         alert(`Uploaded ${result.rows_inserted} rows successfully!`);
                         router.navigate('files');
@@ -304,7 +296,6 @@
                             <div class="flex justify-between items-start mb-2">
                                 <div class="flex-1 min-w-0">
                                     <p class="font-bold truncate">${f.filename}</p>
-                                    <p class="text-sm text-text-secondary">${f.account_type || 'N/A'} • ${f.account_name || 'N/A'}</p>
                                 </div>
                                 <button onclick="screens.deleteFile('${f.filename.replace(/'/g, "\\'")}')" class="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-full">
                                     <span class="material-symbols-outlined">delete</span>
@@ -354,6 +345,14 @@
                             <button data-filter="pending" class="filter-chip shrink-0 h-8 px-4 rounded-full bg-white dark:bg-surface-dark border border-gray-200 dark:border-gray-700 text-sm">Pending</button>
                             <button data-filter="reviewed" class="filter-chip shrink-0 h-8 px-4 rounded-full bg-white dark:bg-surface-dark border border-gray-200 dark:border-gray-700 text-sm">Reviewed</button>
                         </div>
+                        <div class="px-4 pb-4 flex gap-2">
+                           <select id="filterAccountName" class="flex-1 h-9 px-3 rounded-lg border border-gray-200 dark:border-border-dark bg-white dark:bg-surface-dark text-sm">
+                               <option value="">All Accounts</option>
+                           </select>
+                           <select id="filterAccountType" class="flex-1 h-9 px-3 rounded-lg border border-gray-200 dark:border-border-dark bg-white dark:bg-surface-dark text-sm">
+                               <option value="">All Types</option>
+                           </select>
+                        </div>
                     </header>
                     <main id="statementsList" class="flex-1 p-4 space-y-3">
                         <div class="flex justify-center py-8"><div class="size-8 border-2 border-primary/30 border-t-primary rounded-full animate-spin"></div></div>
@@ -361,6 +360,31 @@
                 </div>`;
             },
             async initList() {
+                let currentStatus = '';
+
+                try {
+                    const options = await api.getFilterOptions();
+
+                    const nameSelect = document.getElementById('filterAccountName');
+                    options.account_names.forEach(name => {
+                        const opt = document.createElement('option');
+                        opt.value = name;
+                        opt.textContent = name;
+                        nameSelect.appendChild(opt);
+                    });
+
+                    const typeSelect = document.getElementById('filterAccountType');
+                    options.account_types.forEach(type => {
+                        const opt = document.createElement('option');
+                        opt.value = type;
+                        opt.textContent = type;
+                        typeSelect.appendChild(opt);
+                    });
+
+                    nameSelect.onchange = () => this.loadStatements(currentStatus);
+                    typeSelect.onchange = () => this.loadStatements(currentStatus);
+                } catch (e) { console.error(e); }
+
                 document.querySelectorAll('.filter-chip').forEach(chip => {
                     chip.onclick = () => {
                         document.querySelectorAll('.filter-chip').forEach(c => {
@@ -369,30 +393,41 @@
                         });
                         chip.classList.add('active', 'bg-primary', 'text-white');
                         chip.classList.remove('bg-white', 'dark:bg-surface-dark', 'border');
-                        this.loadStatements(chip.dataset.filter);
+                        currentStatus = chip.dataset.filter;
+                        this.loadStatements(currentStatus);
                     };
                 });
+
+
+
                 await this.loadStatements();
             },
             async loadStatements(statusFilter = null) {
                 const list = document.getElementById('statementsList');
+                if (!list) return;
+
+                const accountName = document.getElementById('filterAccountName')?.value || null;
+                const accountType = document.getElementById('filterAccountType')?.value || null;
+
                 list.innerHTML = '<div class="flex justify-center py-8"><div class="size-8 border-2 border-primary/30 border-t-primary rounded-full animate-spin"></div></div>';
                 try {
-                    const data = await api.getStatements(statusFilter, selectedFile);
+                    const data = await api.getTransactions(statusFilter, selectedFile, accountName, accountType);
                     if (data.data.length === 0) {
                         list.innerHTML = '<p class="text-center text-text-secondary py-8">No transactions found</p>';
                         return;
                     }
-                    list.innerHTML = data.data.map(s => `
-                        <div onclick="router.navigate('details', {id: ${s.id}})" class="bg-white dark:bg-surface-dark p-4 rounded-xl cursor-pointer hover:shadow-md transition-shadow">
+                    list.innerHTML = data.data.map(t => `
+                        <div onclick="router.navigate('details', {id: ${t.Id}})" class="bg-white dark:bg-surface-dark p-4 rounded-xl cursor-pointer hover:shadow-md transition-shadow">
                             <div class="flex justify-between items-start">
                                 <div class="flex-1 min-w-0 mr-3">
-                                    <p class="font-bold truncate">${s.transaction_details || 'Transaction'}</p>
-                                    <p class="text-sm text-text-secondary">₹${(s.amount_inr || 0).toLocaleString()}</p>
+                                    <p class="font-bold truncate">${t.Details || 'Transaction'}</p>
+                                    <p class="text-sm ${t.Debit ? 'text-red-500' : 'text-green-500'}">
+                                        ${t.Debit ? `- ₹${t.Debit.toLocaleString()}` : t.Credit ? `+ ₹${t.Credit.toLocaleString()}` : '₹0'}
+                                    </p>
                                 </div>
                                 <div class="text-right shrink-0">
-                                    <span class="px-2 py-1 rounded text-xs font-bold ${s.review_status === 'reviewed' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' : 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400'}">${s.review_status}</span>
-                                    <p class="text-xs text-gray-400 mt-1">${s.date || ''}</p>
+                                    <span class="px-2 py-1 rounded text-xs font-bold ${t.review_status === 'reviewed' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' : 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400'}">${t.review_status}</span>
+                                    <p class="text-xs text-gray-400 mt-1">${t.Date || ''}</p>
                                 </div>
                             </div>
                         </div>
@@ -417,7 +452,7 @@
                     </main>
                     <footer id="detailsFooter" class="fixed bottom-0 left-0 right-0 p-4 pb-8 bg-background-light dark:bg-background-dark border-t border-gray-200 dark:border-border-dark hidden">
                         <button id="approveBtn" class="w-full h-12 bg-primary text-white font-bold rounded-xl flex items-center justify-center gap-2">
-                            <span class="material-symbols-outlined">check</span> Approve
+                            <span class="material-symbols-outlined">check</span> Review
                         </button>
                     </footer>
                 </div>`;
@@ -426,77 +461,96 @@
                 const content = document.getElementById('detailsContent');
                 const footer = document.getElementById('detailsFooter');
                 try {
-                    const s = await api.getStatement(id);
-                    const isPending = s.review_status !== 'reviewed';
+                    const t = await api.getTransaction(id);
+                    const isPending = t.review_status !== 'reviewed';
 
                     content.innerHTML = `
                         <div class="space-y-4">
                             <div class="bg-white dark:bg-surface-dark p-4 rounded-xl">
-                                <h3 class="text-sm font-bold text-text-secondary mb-3">Statement Info</h3>
+                                <h3 class="text-sm font-bold text-text-secondary mb-3">Transaction Info</h3>
                                 <div class="space-y-2 text-sm">
-                                    <div class="flex justify-between"><span class="text-text-secondary">Date</span><span>${s.date || '-'}</span></div>
-                                    <div class="flex justify-between"><span class="text-text-secondary">Amount</span><span class="font-bold">₹${(s.amount_inr || 0).toLocaleString()}</span></div>
-                                    <div class="flex justify-between"><span class="text-text-secondary">Type</span><span>${s.billing_sign === 'CR' ? 'Credit' : 'Debit'}</span></div>
-                                    <div><span class="text-text-secondary">Details</span><p class="mt-1">${s.transaction_details || '-'}</p></div>
+                                    <div class="flex justify-between"><span class="text-text-secondary">Date</span><span>${t.Date || '-'}</span></div>
+                                    <div class="flex justify-between"><span class="text-text-secondary">Amount</span><span class="font-bold ${t.Debit ? 'text-red-500' : 'text-green-500'}">${t.Debit ? `- ₹${t.Debit.toLocaleString()}` : t.Credit ? `+ ₹${t.Credit.toLocaleString()}` : '₹0'}</span></div>
+                                    <div class="flex justify-between"><span class="text-text-secondary">Type</span><span>${t.Debit ? 'Debit' : 'Credit'}</span></div>
+                                    <div class="flex justify-between"><span class="text-text-secondary">Account</span><span>${t.Account_name || '-'}</span></div>
+                                    <div class="flex justify-between"><span class="text-text-secondary">Account Type</span><span>${t.Account_type || '-'}</span></div>
+                                    <div><span class="text-text-secondary">Details</span><p class="mt-1">${t.Details || '-'}</p></div>
                                 </div>
                             </div>
                             
-                            ${isPending ? `
                             <div class="bg-white dark:bg-surface-dark p-4 rounded-xl space-y-4">
-                                <h3 class="text-sm font-bold text-text-secondary">Create Expense</h3>
-                                <div class="grid grid-cols-2 gap-3">
-                                    <div>
-                                        <label class="text-xs text-text-secondary">Date</label>
-                                        <input id="expTime" type="date" class="w-full h-10 px-3 mt-1 rounded-lg border border-gray-300 dark:border-border-dark bg-white dark:bg-surface-dark text-sm" value="${s.date ? s.date.split('/').reverse().join('-') : new Date().toISOString().split('T')[0]}" />
-                                    </div>
-                                    <div>
-                                        <label class="text-xs text-text-secondary">Type</label>
-                                        <select id="expType" class="w-full h-10 px-3 mt-1 rounded-lg border border-gray-300 dark:border-border-dark bg-white dark:bg-surface-dark text-sm">
-                                            <option value="(-) Expense" ${s.billing_sign !== 'CR' ? 'selected' : ''}>Expense</option>
-                                            <option value="(+) Income" ${s.billing_sign === 'CR' ? 'selected' : ''}>Income</option>
-                                        </select>
-                                    </div>
-                                    <div>
-                                        <label class="text-xs text-text-secondary">Amount</label>
-                                        <input id="expAmount" type="number" step="0.01" class="w-full h-10 px-3 mt-1 rounded-lg border border-gray-300 dark:border-border-dark bg-white dark:bg-surface-dark text-sm" value="${s.amount_inr || 0}" />
-                                    </div>
-                                    <div>
-                                        <label class="text-xs text-text-secondary">Category</label>
-                                        <select id="expCategory" class="w-full h-10 px-3 mt-1 rounded-lg border border-gray-300 dark:border-border-dark bg-white dark:bg-surface-dark text-sm">
-                                            <option>Food</option><option>Grocery</option><option>Shopping</option><option>Transport</option><option>Entertainment</option><option>Bills</option><option>Other</option>
-                                        </select>
-                                    </div>
-                                </div>
+                                <h3 class="text-sm font-bold text-text-secondary">Review Transaction</h3>
                                 <div>
-                                    <label class="text-xs text-text-secondary">Account</label>
-                                    <input id="expAccount" type="text" class="w-full h-10 px-3 mt-1 rounded-lg border border-gray-300 dark:border-border-dark bg-white dark:bg-surface-dark text-sm" value="${s.account_name || 'Credit Card'}" />
+                                    <label class="text-xs text-text-secondary">Category</label>
+                                    <select id="reviewCategory" class="w-full h-10 px-3 mt-1 rounded-lg border border-gray-300 dark:border-border-dark bg-white dark:bg-surface-dark text-sm">
+                                        <option>-</option>
+                                        <option>Cashback</option>
+                                        <option>Ciggerate</option>
+                                        <option>Clothes</option>
+                                        <option>Credit Bill</option>
+                                        <option>Credit card bill</option>
+                                        <option>Food</option>
+                                        <option>Grocery</option>
+                                        <option>Health & Meds</option>
+                                        <option>Home</option>
+                                        <option>Investment</option>
+                                        <option>Milk</option>
+                                        <option>Personal</option>
+                                        <option>Petrol</option>
+                                        <option>Refund</option>
+                                        <option>Salary</option>
+                                        <option>Self</option>
+                                        <option>Transport</option>
+                                        <option>Trip</option>
+                                    </select>
                                 </div>
                                 <div>
                                     <label class="text-xs text-text-secondary">Notes</label>
-                                    <textarea id="expNotes" class="w-full h-16 p-3 mt-1 rounded-lg border border-gray-300 dark:border-border-dark bg-white dark:bg-surface-dark text-sm resize-none">${s.transaction_details || ''}</textarea>
+                                    <textarea id="reviewNotes" class="w-full h-16 p-3 mt-1 rounded-lg border border-gray-300 dark:border-border-dark bg-white dark:bg-surface-dark text-sm resize-none"></textarea>
                                 </div>
-                            </div>` : '<p class="text-center text-green-500 py-4">✓ Already reviewed</p>'}
-                        </div>
-                    `;
+                            </div>
 
-                    if (isPending) {
-                        footer.classList.remove('hidden');
-                        document.getElementById('approveBtn').onclick = async () => {
-                            const data = {
-                                time: document.getElementById('expTime').value,
-                                type: document.getElementById('expType').value,
-                                amount: parseFloat(document.getElementById('expAmount').value) || 0,
-                                category: document.getElementById('expCategory').value,
-                                account: document.getElementById('expAccount').value,
-                                notes: document.getElementById('expNotes').value
-                            };
-                            try {
-                                const result = await api.approveStatement(id, data);
-                                if (result.success) router.navigate('list');
-                                else alert('Failed: ' + (result.detail || 'Unknown error'));
-                            } catch (e) { alert('Failed: ' + e.message); }
+                            <button id="deleteBtn" class="w-full h-12 bg-red-100 text-red-600 font-bold rounded-xl flex items-center justify-center gap-2">
+                                <span class="material-symbols-outlined">delete</span> Delete Transaction
+                            </button>
+                        </div>
+            `;
+
+                    // Pre-fill form
+                    const categorySelect = document.getElementById('reviewCategory');
+                    const notesInput = document.getElementById('reviewNotes');
+
+                    if (t.Category) categorySelect.value = t.Category;
+                    if (t.Notes) notesInput.value = t.Notes;
+                    else notesInput.value = t.Details || '';
+
+                    footer.classList.remove('hidden');
+                    const approveBtn = document.getElementById('approveBtn');
+                    approveBtn.innerHTML = isPending ? '<span class="material-symbols-outlined">check</span> Review' : '<span class="material-symbols-outlined">update</span> Update Review';
+
+                    approveBtn.onclick = async () => {
+                        const data = {
+                            Category: categorySelect.value,
+                            Notes: notesInput.value
                         };
-                    }
+                        try {
+                            const result = await api.reviewTransaction(id, data);
+                            if (result.success) router.navigate('list');
+                            else alert('Failed: ' + (result.detail || 'Unknown error'));
+                        } catch (e) { alert('Failed: ' + e.message); }
+                    };
+
+                    document.getElementById('deleteBtn').onclick = async () => {
+                        if (!confirm('Are you sure you want to delete this transaction?')) return;
+                        try {
+                            const result = await api.deleteTransaction(id);
+                            if (result.success) {
+                                alert(result.message);
+                                router.navigate('list');
+                            }
+                            else alert('Failed: ' + (result.detail || 'Unknown error'));
+                        } catch (e) { alert('Failed: ' + e.message); }
+                    };
                 } catch (e) {
                     content.innerHTML = '<p class="text-center text-red-500 py-8">Failed to load</p>';
                 }
@@ -521,8 +575,8 @@
                             <div>
                                 <label class="text-sm font-medium">Type</label>
                                 <select id="manualType" class="w-full h-12 px-4 mt-1 rounded-lg border border-gray-300 dark:border-border-dark bg-white dark:bg-surface-dark">
-                                    <option value="(-) Expense">Expense</option>
-                                    <option value="(+) Income">Income</option>
+                                    <option value="Debit">Debit</option>
+                                    <option value="Credit">Credit</option>
                                 </select>
                             </div>
                         </div>
@@ -534,7 +588,25 @@
                             <div>
                                 <label class="text-sm font-medium">Category</label>
                                 <select id="manualCategory" class="w-full h-12 px-4 mt-1 rounded-lg border border-gray-300 dark:border-border-dark bg-white dark:bg-surface-dark">
-                                    <option>Food</option><option>Grocery</option><option>Shopping</option><option>Transport</option><option>Entertainment</option><option>Bills</option><option>Other</option>
+                                    <option>-</option>
+                                    <option>Cashback</option>
+                                    <option>Ciggerate</option>
+                                    <option>Clothes</option>
+                                    <option>Credit Bill</option>
+                                    <option>Credit card bill</option>
+                                    <option>Food</option>
+                                    <option>Grocery</option>
+                                    <option>Health & Meds</option>
+                                    <option>Home</option>
+                                    <option>Investment</option>
+                                    <option>Milk</option>
+                                    <option>Personal</option>
+                                    <option>Petrol</option>
+                                    <option>Refund</option>
+                                    <option>Salary</option>
+                                    <option>Self</option>
+                                    <option>Transport</option>
+                                    <option>Trip</option>
                                 </select>
                             </div>
                             <div>
@@ -543,31 +615,43 @@
                             </div>
                         </div>
                         <div>
+                             <label class="text-sm font-medium">Account Type</label>
+                             <select id="manualAccountType" class="w-full h-12 px-4 mt-1 rounded-lg border border-gray-300 dark:border-border-dark bg-white dark:bg-surface-dark">
+                                 <option value="Savings">Savings</option>
+                                 <option value="Credit Card">Credit Card</option>
+                                 <option value="Current">Current</option>
+                             </select>
+                        </div>
+                        <div>
                             <label class="text-sm font-medium">Notes</label>
                             <textarea id="manualNotes" class="w-full h-20 p-4 mt-1 rounded-lg border border-gray-300 dark:border-border-dark bg-white dark:bg-surface-dark resize-none" placeholder="Optional notes..."></textarea>
                         </div>
                     </main>
                     <footer class="p-4 pb-8">
                         <button id="saveExpenseBtn" class="w-full h-12 bg-primary text-white font-bold rounded-xl flex items-center justify-center gap-2">
-                            <span class="material-symbols-outlined">save</span> Save Expense
+                            <span class="material-symbols-outlined">save</span> Save Transaction
                         </button>
                     </footer>
                 </div>`;
             },
             initAddExpense() {
                 document.getElementById('saveExpenseBtn').onclick = async () => {
+                    const amount = parseFloat(document.getElementById('manualAmount').value) || 0;
+                    const type = document.getElementById('manualType').value;
                     const data = {
-                        time: document.getElementById('manualTime').value,
-                        type: document.getElementById('manualType').value,
-                        amount: parseFloat(document.getElementById('manualAmount').value) || 0,
-                        category: document.getElementById('manualCategory').value,
-                        account: document.getElementById('manualAccount').value,
-                        notes: document.getElementById('manualNotes').value
+                        Date: document.getElementById('manualTime').value,
+                        Details: document.getElementById('manualNotes').value || 'Manual entry',
+                        Debit: type === 'Debit' ? amount : undefined,
+                        Credit: type === 'Credit' ? amount : undefined,
+                        Account_name: document.getElementById('manualAccount').value,
+                        Account_type: document.getElementById('manualAccountType').value,
+                        Category: document.getElementById('manualCategory').value,
+                        Notes: document.getElementById('manualNotes').value
                     };
-                    if (!data.amount) { alert('Please enter amount'); return; }
+                    if (!amount) { alert('Please enter amount'); return; }
                     try {
-                        const result = await api.createExpense(data);
-                        if (result.success) { alert('Expense saved!'); router.navigate('home'); }
+                        const result = await api.createTransaction(data);
+                        if (result.success) { alert('Transaction saved!'); router.navigate('home'); }
                         else alert('Failed: ' + (result.detail || 'Unknown error'));
                     } catch (e) { alert('Failed: ' + e.message); }
                 };
@@ -576,7 +660,7 @@
             // Settings Screen
             settings() {
                 return `
-                <div class="flex flex-col min-h-screen">
+            < div class="flex flex-col min-h-screen" >
                     <header class="flex items-center p-4 border-b border-gray-200 dark:border-border-dark">
                         <button onclick="router.navigate('home')" class="p-2 -ml-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700">
                             <span class="material-symbols-outlined">arrow_back</span>
@@ -585,49 +669,17 @@
                     </header>
                     <main class="flex-1 p-4 space-y-4">
                         <div class="bg-white dark:bg-surface-dark p-4 rounded-xl">
-                            <h3 class="font-bold mb-3">Export Expenses</h3>
-                            <div class="grid grid-cols-2 gap-3 mb-3">
-                                <div>
-                                    <label class="text-xs text-text-secondary">Start Date</label>
-                                    <input id="exportStart" type="date" class="w-full h-10 px-3 mt-1 rounded-lg border border-gray-300 dark:border-border-dark bg-white dark:bg-surface-dark text-sm" />
-                                </div>
-                                <div>
-                                    <label class="text-xs text-text-secondary">End Date</label>
-                                    <input id="exportEnd" type="date" class="w-full h-10 px-3 mt-1 rounded-lg border border-gray-300 dark:border-border-dark bg-white dark:bg-surface-dark text-sm" />
-                                </div>
-                            </div>
-                            <button id="exportBtn" class="w-full h-10 bg-green-500 text-white font-bold rounded-lg flex items-center justify-center gap-2">
-                                <span class="material-symbols-outlined text-lg">download</span> Download CSV
-                            </button>
-                        </div>
-                        
-                        <div class="bg-white dark:bg-surface-dark p-4 rounded-xl">
                             <h3 class="font-bold mb-3 text-red-500">Danger Zone</h3>
-                            <div class="space-y-2">
-                                <button id="clearStatementsBtn" class="w-full h-10 bg-red-100 dark:bg-red-900/30 text-red-600 font-bold rounded-lg">Clear All Statements</button>
-                                <button id="clearExpensesBtn" class="w-full h-10 bg-red-100 dark:bg-red-900/30 text-red-600 font-bold rounded-lg">Clear All Expenses</button>
-                            </div>
+                            <button id="clearTransactionsBtn" class="w-full h-10 bg-red-100 dark:bg-red-900/30 text-red-600 font-bold rounded-lg">Clear All Transactions</button>
                         </div>
                     </main>
-                </div>`;
+                </div >`;
             },
             initSettings() {
-                document.getElementById('exportBtn').onclick = () => {
-                    const start = document.getElementById('exportStart').value;
-                    const end = document.getElementById('exportEnd').value;
-                    api.exportExpenses(start, end);
-                };
-                document.getElementById('clearStatementsBtn').onclick = async () => {
-                    if (!confirm('Delete ALL statement records? This cannot be undone.')) return;
+                document.getElementById('clearTransactionsBtn').onclick = async () => {
+                    if (!confirm('Delete ALL transaction records? This cannot be undone.')) return;
                     try {
-                        const result = await api.clearTable('credit_card_statements');
-                        alert(result.message);
-                    } catch (e) { alert('Failed: ' + e.message); }
-                };
-                document.getElementById('clearExpensesBtn').onclick = async () => {
-                    if (!confirm('Delete ALL expense records? This cannot be undone.')) return;
-                    try {
-                        const result = await api.clearTable('expenses');
+                        const result = await api.clearTable('transactions');
                         alert(result.message);
                     } catch (e) { alert('Failed: ' + e.message); }
                 };

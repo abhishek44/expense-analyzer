@@ -9,8 +9,8 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.models import (
-    CreditCardStatement,
-    CREDIT_CARD_COLUMN_MAPPING,
+    Transaction,
+    TRANSACTION_COLUMN_MAPPING,
 )
 
 
@@ -44,115 +44,27 @@ def parse_float(value: str) -> float | None:
         return None
 
 
-def map_csv_to_credit_card_statement(
-    row: dict[str, str],
-    headers: list[str],
-    filename: str,
-    upload_time: datetime
-) -> dict[str, Any]:
+def validate_headers(headers: list[str]) -> bool:
     """
-    Map CSV row to CreditCardStatement model fields.
-    
-    Handles column name variations and converts values to appropriate types.
+    Validate that CSV headers strictly match the expected schema.
+    Returns True if valid, False otherwise.
     """
-    mapped_data = {
-        "filename": filename,
-        "uploaded_datetime": upload_time,
-    }
-    
-    # Try to map each expected column
-    for csv_header, model_field in CREDIT_CARD_COLUMN_MAPPING.items():
-        # Try exact match first
-        if csv_header in row:
-            value = row[csv_header].strip()
-        else:
-            # Try case-insensitive match
-            value = None
-            for h in headers:
-                if h.lower().replace(" ", "").replace(".", "") == csv_header.lower().replace(" ", "").replace(".", ""):
-                    value = row.get(h, "").strip()
-                    break
-            if value is None:
-                value = ""
-        
-        # Convert to appropriate type based on field
-        if model_field in ["reward_points", "intl_amount", "amount_inr"]:
-            mapped_data[model_field] = parse_float(value)
-        else:
-            mapped_data[model_field] = value if value else None
-    
-    return mapped_data
+    expected_columns = set(TRANSACTION_COLUMN_MAPPING.keys())
+    # Check if all expected columns are present in headers
+    # We require exact matches
+    current_headers = set(headers)
+    return expected_columns.issubset(current_headers)
 
 
-def is_credit_card_statement_format(headers: list[str]) -> bool:
-    """
-    Check if CSV headers match credit card statement format.
-    
-    Returns True if at least 4 expected columns are found.
-    """
-    expected_columns = set(CREDIT_CARD_COLUMN_MAPPING.keys())
-    normalized_headers = {h.lower().replace(" ", "").replace(".", "") for h in headers}
-    normalized_expected = {c.lower().replace(" ", "").replace(".", "") for c in expected_columns}
-    
-    matches = normalized_headers & normalized_expected
-    return len(matches) >= 4  # At least 4 matching columns
-
-
-def convert_to_credit_card_format(
-    row: dict[str, str],
-    headers: list[str]
-) -> dict[str, Any]:
-    """
-    Convert CSV row with different structure to credit card statement format.
-    
-    Attempts to intelligently map columns based on common patterns.
-    """
-    result = {}
-    
-    # Mapping heuristics for common column name patterns
-    column_patterns = {
-        "date": ["date", "time", "datetime", "transaction_date"],
-        "sr_no": ["sr_no", "serial", "id", "ref", "reference"],
-        "transaction_details": ["details", "description", "transaction", "narration", "particulars"],
-        "reward_points": ["reward", "points", "bonus"],
-        "intl_amount": ["intl", "international", "foreign"],
-        "amount_inr": ["amount", "inr", "rs", "value", "sum"],
-        "billing_sign": ["sign", "type", "cr", "dr", "credit", "debit"],
-    }
-    
-    # Normalize all headers
-    header_lower_map = {h.lower(): h for h in headers}
-    
-    for model_field, patterns in column_patterns.items():
-        value = None
-        for pattern in patterns:
-            for header_lower, header_orig in header_lower_map.items():
-                if pattern in header_lower:
-                    value = row.get(header_orig, "").strip()
-                    break
-            if value:
-                break
-        
-        if model_field in ["reward_points", "intl_amount", "amount_inr"]:
-            result[model_field] = parse_float(value) if value else None
-        else:
-            result[model_field] = value if value else None
-    
-    return result
-
-
-async def process_credit_card_csv(
+def process_transaction_csv(
     db: Session,
     file_content: bytes,
     filename: str,
-    account_type: str | None = None,
     account_name: str | None = None
 ) -> dict[str, Any]:
     """
-    Process credit card statement CSV and insert into fixed table.
-    
-    - If CSV matches expected format, maps columns directly
-    - If CSV has different structure, converts to match schema
+    Process transaction CSV and insert into transactions table.
+    Enforces strict schema compliance.
     """
     headers, rows = parse_csv_content(file_content)
     
@@ -162,32 +74,85 @@ async def process_credit_card_csv(
     if not rows:
         raise ValueError("CSV file has no data rows")
     
+    # Strict validation
+    if not validate_headers(headers):
+        expected_list = ", ".join(TRANSACTION_COLUMN_MAPPING.keys())
+        raise ValueError(f"Invalid CSV format. Strictly required columns: {expected_list}")
+    
     upload_time = datetime.now()
     inserted_count = 0
-    is_native_format = is_credit_card_statement_format(headers)
+    transactions_to_insert = []
     
     for row in rows:
-        if is_native_format:
-            mapped_data = map_csv_to_credit_card_statement(row, headers, filename, upload_time)
-        else:
-            mapped_data = convert_to_credit_card_format(row, headers)
-            mapped_data["filename"] = filename
-            mapped_data["uploaded_datetime"] = upload_time
+        # strict mapping
+        mapped_data = {
+            "filename": filename,
+            "uploaded_datetime": upload_time,
+        }
         
-        # Add account metadata
-        mapped_data["account_type"] = account_type
-        mapped_data["account_name"] = account_name
+        for csv_header, model_field in TRANSACTION_COLUMN_MAPPING.items():
+            value = row.get(csv_header, "").strip()
+            
+            if model_field in ["Debit", "Credit"]:
+                mapped_data[model_field] = parse_float(value)
+            elif model_field == "review_datetime" and value:
+                try:
+                    for fmt in ["%d-%m-%Y %H:%M", "%d-%m-%Y %H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"]:
+                        try:
+                            mapped_data[model_field] = datetime.strptime(value, fmt)
+                            break
+                        except ValueError:
+                            continue
+                    else:
+                        mapped_data[model_field] = None
+                except Exception:
+                     mapped_data[model_field] = None
+            else:
+                mapped_data[model_field] = value if value else None
+
+        # Override account name if provided in upload (optional feature, but keeping as fallback/overwrite?)
+        # User asked for "AccountName" column. If API passes account_name, we might want to prioritize it or ignore it.
+        # But for now, let's keep the existing logic: if passed, it overrides (or fills). 
+        # Actually user said "AccountName" is mandatory in CSV.
+        # So we should probably trust the CSV. 
+        # However, the `account_name` arg comes from the API form data.
+        # If the user uploads with the form, they might expect it to be used.
+        # But strict schema implies the CSV data is the source of truth.
+        # I will prioritize the CSV data, but if it's somehow missing/empty (which shouldn't happen with strict checks but value could be empty string), use the form.
         
-        # Create and add record
-        statement = CreditCardStatement(**mapped_data)
-        db.add(statement)
+        if not mapped_data.get("Account_name") and account_name:
+             mapped_data["Account_name"] = account_name
+
+        transactions_to_insert.append(mapped_data)
+    
+    # Sort transactions by date in ascending order
+    def parse_date_for_sort(transaction_data):
+        date_str = transaction_data.get("Date", "")
+        if not date_str:
+            return datetime.min
+        try:
+            for fmt in ["%d-%b-%y", "%Y-%m-%d", "%d/%m/%Y", "%m/%d/%Y", "%d-%m-%Y"]:
+                try:
+                    return datetime.strptime(date_str, fmt)
+                except ValueError:
+                    continue
+            return datetime.min
+        except:
+            return datetime.min
+    
+    transactions_to_insert.sort(key=parse_date_for_sort)
+    
+    # Insert sorted transactions
+    for mapped_data in transactions_to_insert:
+        transaction = Transaction(**mapped_data)
+        db.add(transaction)
         inserted_count += 1
     
     db.commit()
     
     return {
-        "table_name": "credit_card_statements",
+        "table_name": "transactions",
         "rows_inserted": inserted_count,
-        "columns": list(CREDIT_CARD_COLUMN_MAPPING.values()) + ["filename", "uploaded_datetime", "account_type", "account_name"],
-        "format_converted": not is_native_format,
+        "columns": list(TRANSACTION_COLUMN_MAPPING.values()) + ["filename", "uploaded_datetime"],
+        "format_converted": False,
     }
