@@ -60,6 +60,14 @@
 
         // State
         let selectedFile = null;
+        const appState = {
+            filters: {
+                status: '',
+                accountName: '',
+                accountType: ''
+            },
+            currentRequestToken: 0
+        };
 
         const api = {
             async uploadCSV(file, accountName) {
@@ -329,6 +337,7 @@
 
             // Transaction List Screen
             list() {
+                const { status, accountName, accountType } = appState.filters;
                 return `
                 <div class="flex flex-col min-h-screen">
                     <header class="sticky top-0 z-10 bg-background-light dark:bg-background-dark border-b border-gray-200 dark:border-border-dark">
@@ -341,9 +350,9 @@
                             </div>
                         </div>
                         <div class="flex gap-2 px-4 pb-3 overflow-x-auto no-scrollbar">
-                            <button data-filter="" class="filter-chip active shrink-0 h-8 px-4 rounded-full bg-primary text-white text-sm font-bold">All</button>
-                            <button data-filter="pending" class="filter-chip shrink-0 h-8 px-4 rounded-full bg-white dark:bg-surface-dark border border-gray-200 dark:border-gray-700 text-sm">Pending</button>
-                            <button data-filter="reviewed" class="filter-chip shrink-0 h-8 px-4 rounded-full bg-white dark:bg-surface-dark border border-gray-200 dark:border-gray-700 text-sm">Reviewed</button>
+                            <button data-filter="" class="filter-chip ${status === '' ? 'active bg-primary text-white' : 'bg-white dark:bg-surface-dark border border-gray-200 dark:border-gray-700'} shrink-0 h-8 px-4 rounded-full text-sm font-bold">All</button>
+                            <button data-filter="pending" class="filter-chip ${status === 'pending' ? 'active bg-primary text-white' : 'bg-white dark:bg-surface-dark border border-gray-200 dark:border-gray-700'} shrink-0 h-8 px-4 rounded-full text-sm">Pending</button>
+                            <button data-filter="reviewed" class="filter-chip ${status === 'reviewed' ? 'active bg-primary text-white' : 'bg-white dark:bg-surface-dark border border-gray-200 dark:border-gray-700'} shrink-0 h-8 px-4 rounded-full text-sm">Reviewed</button>
                         </div>
                         <div class="px-4 pb-4 flex gap-2">
                            <select id="filterAccountName" class="flex-1 h-9 px-3 rounded-lg border border-gray-200 dark:border-border-dark bg-white dark:bg-surface-dark text-sm">
@@ -402,20 +411,31 @@
 
                 await this.loadStatements();
             },
-            async loadStatements(statusFilter = null) {
+            async loadStatements() {
                 const list = document.getElementById('statementsList');
                 if (!list) return;
 
-                const accountName = document.getElementById('filterAccountName')?.value || null;
-                const accountType = document.getElementById('filterAccountType')?.value || null;
+                const { status, accountName, accountType } = appState.filters;
+                const requestToken = ++appState.currentRequestToken;
 
                 list.innerHTML = '<div class="flex justify-center py-8"><div class="size-8 border-2 border-primary/30 border-t-primary rounded-full animate-spin"></div></div>';
                 try {
-                    const data = await api.getTransactions(statusFilter, selectedFile, accountName, accountType);
+                    const data = await api.getTransactions(status, selectedFile, accountName, accountType);
+
+                    // Race condition check: ignore if newer request started
+                    if (requestToken !== appState.currentRequestToken) return;
+
                     if (data.data.length === 0) {
-                        list.innerHTML = '<p class="text-center text-text-secondary py-8">No transactions found</p>';
+                        list.innerHTML = `
+                            <div class="text-center py-8">
+                                <p class="text-text-secondary mb-3">No transactions found</p>
+                                ${(status || accountName || accountType) ?
+                                `<button onclick="screens.clearFilters()" class="text-primary font-bold text-sm hover:underline">Clear Filters</button>`
+                                : ''}
+                            </div>`;
                         return;
                     }
+
                     list.innerHTML = data.data.map(t => `
                         <div onclick="router.navigate('details', {id: ${t.Id}})" class="bg-white dark:bg-surface-dark p-4 rounded-xl cursor-pointer hover:shadow-md transition-shadow">
                             <div class="flex justify-between items-start">
@@ -433,8 +453,15 @@
                         </div>
                     `).join('');
                 } catch (e) {
-                    list.innerHTML = '<p class="text-center text-red-500 py-8">Failed to load</p>';
+                    if (requestToken === appState.currentRequestToken) {
+                        list.innerHTML = '<p class="text-center text-red-500 py-8">Failed to load</p>';
+                    }
                 }
+            },
+
+            clearFilters() {
+                appState.filters = { status: '', accountName: '', accountType: '' };
+                router.navigate('list'); // Re-renders header with correct state
             },
 
             // Details/Approve Screen

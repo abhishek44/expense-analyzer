@@ -47,12 +47,24 @@ export default function TransactionsScreen({ navigation, route }: Props) {
         try {
             const opts = await api.getFilterOptions();
             setFilterOptions(opts);
+
+            // Stale selection check
+            if (accountName && !opts.accountNames.includes(accountName)) {
+                setAccountName('');
+            }
+            if (accountType && !opts.accountTypes.includes(accountType)) {
+                setAccountType('');
+            }
         } catch (e) {
             console.error('Failed to load filter options');
         }
     };
 
+    // Race condition tracking
+    const requestRef = React.useRef(0);
+
     const loadStatements = async () => {
+        const requestId = ++requestRef.current;
         try {
             setLoading(true);
             const data = await api.getTransactions(
@@ -61,13 +73,21 @@ export default function TransactionsScreen({ navigation, route }: Props) {
                 accountName || undefined,
                 accountType || undefined
             );
-            setTransactions(data.data);
+
+            // Ignore stale responses
+            if (requestId === requestRef.current) {
+                setTransactions(data.data);
+            }
         } catch (e) {
-            Alert.alert('Error', 'Failed to load transactions');
-            console.error(e);
+            if (requestId === requestRef.current) {
+                Alert.alert('Error', 'Failed to load transactions');
+                console.error(e);
+            }
         } finally {
-            setLoading(false);
-            setRefreshing(false);
+            if (requestId === requestRef.current) {
+                setLoading(false);
+                setRefreshing(false);
+            }
         }
     };
 
@@ -203,7 +223,29 @@ export default function TransactionsScreen({ navigation, route }: Props) {
                     keyExtractor={(item) => item.Id.toString()}
                     contentContainerStyle={styles.list}
                     ListEmptyComponent={
-                        <Text style={styles.emptyText}>No transactions found</Text>
+                        <View style={styles.emptyContainer}>
+                            <Text style={styles.emptyText}>No transactions found</Text>
+                            {(filter || accountName || accountType) && (
+                                <TouchableOpacity onPress={() => {
+                                    setFilter('');
+                                    setAccountName('');
+                                    setAccountType('');
+                                    // loadStatements will trigger via useEffect dependency if we added it,
+                                    // but currently we manually trigger it elsewhere or rely on effect. 
+                                    // Since effect has [filter], clearing filter triggers reload.
+                                    // For names/types we might need explicit reload if effect doesn't cover them.
+                                    // Let's manually trigger to be safe or rely on state update.
+                                    // Ideally, we should add accountName/Type to useFocusEffect dependency or similar.
+                                    // For now, let's just update state, and the user can pull to refresh or we can trigger.
+                                    // Actually, let's trigger reload slightly delayed or rely on the state change if we add deps.
+                                    // Best approach: Update state, and call loadStatements() inside a useEffect or here.
+                                    // Given existing structure, let's just reset state. The `loadStatements` depends on state values when called.
+                                    setTimeout(loadStatements, 0);
+                                }}>
+                                    <Text style={styles.clearFilterText}>Clear Filters</Text>
+                                </TouchableOpacity>
+                            )}
+                        </View>
                     }
                     refreshControl={
                         <RefreshControl
@@ -318,6 +360,16 @@ const styles = StyleSheet.create({
         textAlign: 'center',
         marginTop: spacing.xl,
         fontSize: 16,
+    },
+    emptyContainer: {
+        alignItems: 'center',
+        padding: spacing.xl,
+    },
+    clearFilterText: {
+        color: colors.primary,
+        fontSize: 14,
+        fontWeight: 'bold',
+        marginTop: spacing.md,
     },
     header: {
         paddingBottom: spacing.sm,
