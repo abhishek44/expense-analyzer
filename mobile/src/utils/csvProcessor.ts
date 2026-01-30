@@ -14,7 +14,7 @@ const TRANSACTION_COLUMN_MAPPING: Record<string, string> = {
     'Category': 'Category',
     'Notes': 'Notes',
     'ReviewStatus': 'review_status',
-    'ReviewdateTime': 'review_datetime',
+    'ReviewDateTime': 'review_datetime',
 };
 
 /**

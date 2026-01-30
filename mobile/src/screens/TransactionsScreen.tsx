@@ -38,10 +38,16 @@ export default function TransactionsScreen({ navigation, route }: Props) {
 
     useFocusEffect(
         useCallback(() => {
-            loadStatements();
             loadFilterOptions();
-        }, [filter])
+        }, [])
     );
+
+    useEffect(() => {
+        loadStatements();
+    }, [filter, filename, accountName, accountType]);
+
+    // Scroll tracking
+    const scrollOffset = React.useRef(0);
 
     const loadFilterOptions = async () => {
         try {
@@ -222,6 +228,9 @@ export default function TransactionsScreen({ navigation, route }: Props) {
                     renderItem={renderStatement}
                     keyExtractor={(item) => item.Id.toString()}
                     contentContainerStyle={styles.list}
+                    onScroll={(e) => {
+                        scrollOffset.current = e.nativeEvent.contentOffset.y;
+                    }}
                     ListEmptyComponent={
                         <View style={styles.emptyContainer}>
                             <Text style={styles.emptyText}>No transactions found</Text>
