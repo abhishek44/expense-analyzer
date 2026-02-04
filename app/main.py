@@ -10,7 +10,7 @@ from fastapi.responses import FileResponse
 
 from app.config import settings
 from app.database import init_db
-from app.routers import csv_upload
+from app.routers import csv_upload, accounts
 
 
 @asynccontextmanager
@@ -40,6 +40,7 @@ app.add_middleware(
 
 # Include API routers
 app.include_router(csv_upload.router)
+app.include_router(accounts.router)
 
 # Mount static files
 static_path = Path(__file__).parent.parent / "static"

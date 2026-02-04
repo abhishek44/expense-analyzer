@@ -9,6 +9,7 @@ import TransactionsScreen from '../screens/TransactionsScreen';
 import DetailsScreen from '../screens/DetailsScreen';
 import AddExpenseScreen from '../screens/AddExpenseScreen';
 import SettingsScreen from '../screens/SettingsScreen';
+import AccountsScreen from '../screens/AccountsScreen';
 import { colors } from '../theme/colors';
 
 export type RootStackParamList = {
@@ -19,6 +20,7 @@ export type RootStackParamList = {
     Details: { id: number };
     AddExpense: undefined;
     Settings: undefined;
+    Accounts: undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -75,6 +77,11 @@ export default function AppNavigator() {
                     name="Settings"
                     component={SettingsScreen}
                     options={{ title: 'Settings' }}
+                />
+                <Stack.Screen
+                    name="Accounts"
+                    component={AccountsScreen}
+                    options={{ title: 'Accounts' }}
                 />
             </Stack.Navigator>
         </NavigationContainer>

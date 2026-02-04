@@ -129,6 +129,35 @@
                     body: JSON.stringify(data)
                 });
                 return res.json();
+            },
+            // Accounts API
+            async getAccounts() {
+                const res = await fetch(`${API_BASE}/accounts`);
+                return res.json();
+            },
+            async createAccount(data) {
+                const res = await fetch(`${API_BASE}/accounts`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                });
+                return res.json();
+            },
+            async updateAccount(id, data) {
+                const res = await fetch(`${API_BASE}/accounts/${id}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                });
+                return res.json();
+            },
+            async deleteAccount(id) {
+                const res = await fetch(`${API_BASE}/accounts/${id}`, { method: 'DELETE' });
+                return res.json();
+            },
+            async getAccountTypes() {
+                const res = await fetch(`${API_BASE}/account-types`);
+                return res.json();
             }
         };
 
@@ -150,6 +179,7 @@
                     case 'details': app.innerHTML = screens.details(this.params.id); screens.initDetails(this.params.id); break;
                     case 'addExpense': app.innerHTML = screens.addExpense(); screens.initAddExpense(); break;
                     case 'settings': app.innerHTML = screens.settings(); screens.initSettings(); break;
+                    case 'accounts': app.innerHTML = screens.accounts(); screens.initAccounts(); break;
                 }
             }
         };
@@ -189,6 +219,10 @@
                             <button onclick="router.navigate('addExpense')" class="w-full flex items-center gap-4 p-4 bg-white dark:bg-surface-dark rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700">
                                 <span class="material-symbols-outlined text-primary">add_circle</span>
                                 <div class="text-left"><p class="font-bold">Add Transaction</p><p class="text-sm text-text-secondary">Manual entry</p></div>
+                            </button>
+                            <button onclick="router.navigate('accounts')" class="w-full flex items-center gap-4 p-4 bg-white dark:bg-surface-dark rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700">
+                                <span class="material-symbols-outlined text-primary">account_balance</span>
+                                <div class="text-left"><p class="font-bold">Accounts</p><p class="text-sm text-text-secondary">Manage your accounts</p></div>
                             </button>
                         </div>
                     </main>
@@ -710,6 +744,196 @@
                         alert(result.message);
                     } catch (e) { alert('Failed: ' + e.message); }
                 };
+            },
+
+            // Accounts Screen
+            accounts() {
+                return `
+                <div class="flex flex-col min-h-screen">
+                    <header class="flex items-center p-4 border-b border-gray-200 dark:border-border-dark">
+                        <button onclick="router.navigate('home')" class="p-2 -ml-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700">
+                            <span class="material-symbols-outlined">arrow_back</span>
+                        </button>
+                        <h1 class="text-lg font-bold ml-2">Accounts</h1>
+                    </header>
+                    <main id="accountsList" class="flex-1 p-4 space-y-3">
+                        <div class="flex justify-center py-8"><div class="size-8 border-2 border-primary/30 border-t-primary rounded-full animate-spin"></div></div>
+                    </main>
+                    <footer class="p-4 pb-8">
+                        <button onclick="screens.openAccountModal()" class="w-full h-12 bg-surface-dark border border-border-dark text-white font-bold rounded-xl flex items-center justify-center gap-2 hover:bg-gray-700">
+                            <span class="material-symbols-outlined">add_circle</span> ADD NEW ACCOUNT
+                        </button>
+                    </footer>
+                </div>
+                
+                <!-- Account Modal -->
+                <div id="accountModal" class="fixed inset-0 bg-black/60 items-center justify-center z-50 hidden">
+                    <div class="bg-surface-dark rounded-xl p-6 w-[90%] max-w-md border border-border-dark">
+                        <h2 id="modalTitle" class="text-xl font-bold text-center mb-6">Add new account</h2>
+                        
+                        <div class="space-y-4">
+                            <div>
+                                <label class="text-text-secondary text-sm">Initial amount</label>
+                                <input id="accountAmount" type="number" step="0.01" value="0" class="w-full h-10 px-3 mt-1 rounded-lg bg-[#4a5e4a] text-white" />
+                                <p class="text-xs text-text-secondary mt-1 italic">*Initial amount will not be reflected in analysis</p>
+                            </div>
+                            
+                            <div>
+                                <label class="text-text-secondary text-sm">Name</label>
+                                <input id="accountName" type="text" placeholder="Account name" class="w-full h-10 px-3 mt-1 rounded-lg bg-[#4a5e4a] text-white" />
+                            </div>
+                            
+                            <div>
+                                <label class="text-text-secondary text-sm">Account Type</label>
+                                <div id="accountTypeButtons" class="flex flex-wrap gap-2 mt-1">
+                                    <button data-type="SAVINGS" class="type-btn px-3 py-1.5 rounded-lg text-sm border border-border-dark">Savings</button>
+                                    <button data-type="CURRENT" class="type-btn px-3 py-1.5 rounded-lg text-sm border border-border-dark">Current</button>
+                                    <button data-type="CREDIT_CARD" class="type-btn px-3 py-1.5 rounded-lg text-sm border border-border-dark">Credit Card</button>
+                                    <button data-type="CASH" class="type-btn px-3 py-1.5 rounded-lg text-sm border border-border-dark">Cash</button>
+                                    <button data-type="WALLET" class="type-btn px-3 py-1.5 rounded-lg text-sm border border-border-dark">Wallet</button>
+                                    <button data-type="INVESTMENT" class="type-btn px-3 py-1.5 rounded-lg text-sm border border-border-dark">Investment</button>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="flex justify-center gap-4 mt-6">
+                            <button onclick="screens.closeAccountModal()" class="px-6 py-2 bg-background-dark border border-border-dark rounded-lg font-bold">CANCEL</button>
+                            <button onclick="screens.saveAccount()" class="px-6 py-2 bg-[#4a5e4a] rounded-lg font-bold">SAVE</button>
+                        </div>
+                    </div>
+                </div>`;
+            },
+
+            accountModalState: { editingId: null, selectedType: null },
+
+            async initAccounts() {
+                const list = document.getElementById('accountsList');
+                try {
+                    const data = await api.getAccounts();
+                    if (data.accounts.length === 0) {
+                        list.innerHTML = `
+                            <div class="text-center py-12">
+                                <span class="text-4xl">🏦</span>
+                                <p class="text-text-secondary mt-4">No accounts yet</p>
+                                <p class="text-sm text-text-secondary">Add your first account to get started</p>
+                            </div>`;
+                        return;
+                    }
+
+                    const getIcon = (type) => {
+                        const icons = { SAVINGS: '🐷', CURRENT: '🏦', CREDIT_CARD: '💳', CASH: '💵', WALLET: '👛', INVESTMENT: '📈' };
+                        return icons[type] || '💰';
+                    };
+
+                    list.innerHTML = data.accounts.map(a => `
+                        <div class="bg-white dark:bg-surface-dark p-4 rounded-xl flex items-center justify-between">
+                            <div class="flex items-center gap-3">
+                                <span class="text-2xl">${getIcon(a.account_type)}</span>
+                                <div>
+                                    <p class="font-bold">${a.name}</p>
+                                    <p class="text-sm text-text-secondary">Balance: ₹${a.balance.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</p>
+                                </div>
+                            </div>
+                            <div class="relative">
+                                <button onclick="screens.toggleAccountMenu('${a.id}')" class="p-2 hover:bg-gray-700 rounded-full">
+                                    <span class="material-symbols-outlined">more_vert</span>
+                                </button>
+                                <div id="menu-${a.id}" class="hidden absolute right-0 top-10 bg-background-dark border border-border-dark rounded-lg shadow-lg z-10">
+                                    <button onclick="screens.editAccount('${a.id}')" class="block w-full px-4 py-2 text-left hover:bg-gray-700">Edit</button>
+                                    <button onclick="screens.deleteAccount('${a.id}', '${a.name.replace(/'/g, "\\'")}')" class="block w-full px-4 py-2 text-left text-red-500 hover:bg-gray-700">Delete</button>
+                                </div>
+                            </div>
+                        </div>
+                    `).join('');
+                } catch (e) {
+                    list.innerHTML = '<p class="text-center text-red-500 py-8">Failed to load accounts</p>';
+                    console.error(e);
+                }
+            },
+
+            toggleAccountMenu(id) {
+                const menu = document.getElementById(`menu-${id}`);
+                document.querySelectorAll('[id^="menu-"]').forEach(m => {
+                    if (m.id !== `menu-${id}`) m.classList.add('hidden');
+                });
+                menu.classList.toggle('hidden');
+            },
+
+            openAccountModal(account = null) {
+                this.accountModalState = { editingId: account?.id || null, selectedType: account?.account_type || null };
+                document.getElementById('modalTitle').textContent = account ? 'Edit account' : 'Add new account';
+                document.getElementById('accountName').value = account?.name || '';
+                document.getElementById('accountAmount').value = account?.opening_balance || 0;
+
+                document.querySelectorAll('.type-btn').forEach(btn => {
+                    btn.classList.remove('bg-primary', 'text-white');
+                    btn.classList.add('bg-background-dark');
+                    if (btn.dataset.type === this.accountModalState.selectedType) {
+                        btn.classList.add('bg-primary', 'text-white');
+                        btn.classList.remove('bg-background-dark');
+                    }
+                    btn.onclick = () => {
+                        document.querySelectorAll('.type-btn').forEach(b => {
+                            b.classList.remove('bg-primary', 'text-white');
+                            b.classList.add('bg-background-dark');
+                        });
+                        btn.classList.add('bg-primary', 'text-white');
+                        btn.classList.remove('bg-background-dark');
+                        this.accountModalState.selectedType = btn.dataset.type;
+                    };
+                });
+
+                document.getElementById('accountModal').classList.remove('hidden');
+                document.getElementById('accountModal').classList.add('flex');
+            },
+
+            closeAccountModal() {
+                document.getElementById('accountModal').classList.add('hidden');
+                document.getElementById('accountModal').classList.remove('flex');
+                this.accountModalState = { editingId: null, selectedType: null };
+            },
+
+            async editAccount(id) {
+                try {
+                    const account = (await api.getAccounts()).accounts.find(a => a.id === id);
+                    if (account) this.openAccountModal(account);
+                } catch (e) { alert('Failed to load account'); }
+            },
+
+            async deleteAccount(id, name) {
+                if (!confirm(`Delete account "${name}"?`)) return;
+                try {
+                    const result = await api.deleteAccount(id);
+                    if (result.success) this.initAccounts();
+                    else alert('Failed: ' + (result.detail || 'Unknown error'));
+                } catch (e) { alert('Failed: ' + e.message); }
+            },
+
+            async saveAccount() {
+                const name = document.getElementById('accountName').value.trim();
+                const amount = parseFloat(document.getElementById('accountAmount').value) || 0;
+                const type = this.accountModalState.selectedType;
+
+                if (name.length < 2) { alert('Name must be at least 2 characters'); return; }
+                if (!type) { alert('Please select an account type'); return; }
+
+                const data = { name, account_type: type, opening_balance: amount, currency: 'INR' };
+
+                try {
+                    let result;
+                    if (this.accountModalState.editingId) {
+                        result = await api.updateAccount(this.accountModalState.editingId, data);
+                    } else {
+                        result = await api.createAccount(data);
+                    }
+
+                    if (result.success) {
+                        this.closeAccountModal();
+                        this.initAccounts();
+                    } else {
+                        alert('Failed: ' + (result.detail || 'Unknown error'));
+                    }
+                } catch (e) { alert('Failed: ' + e.message); }
             }
         };
 

@@ -25,6 +25,26 @@ export interface UploadedFileRecord {
     transaction_count: number;
 }
 
+export enum AccountType {
+    SAVINGS = 'SAVINGS',
+    CURRENT = 'CURRENT',
+    CREDIT_CARD = 'CREDIT_CARD',
+    CASH = 'CASH',
+    WALLET = 'WALLET',
+    INVESTMENT = 'INVESTMENT'
+}
+
+export interface Account {
+    id: string;                // UUID
+    name: string;
+    account_type: AccountType;
+    currency: string;          // Default: 'INR'
+    opening_balance: number;   // Default: 0
+    is_archived: number;       // 0 or 1
+    created_at: string;        // ISO timestamp
+    updated_at: string;        // ISO timestamp
+}
+
 export enum ReviewStatus {
     PENDING = 'pending',
     REVIEWED = 'reviewed',
@@ -52,7 +72,10 @@ class Database {
         // Create new initialization promise
         this.initPromise = (async () => {
             try {
-                this.db = await SQLite.openDatabaseAsync('expense_analyzer.db');
+                // Use useNewConnection to avoid NullPointerException issues on some Android devices
+                this.db = await SQLite.openDatabaseAsync('expense_analyzer.db', {
+                    useNewConnection: true
+                });
                 await this.createTables();
                 this.isInitialized = true;
                 console.log('Database initialized successfully');
@@ -81,6 +104,7 @@ class Database {
                 Credit REAL,
                 Account_name TEXT,
                 Account_type TEXT,
+                account_id TEXT,
                 filename TEXT,
                 review_status TEXT DEFAULT 'pending',
                 review_datetime TEXT,
@@ -103,6 +127,21 @@ class Database {
                 local_id INTEGER PRIMARY KEY,
                 synced_at TEXT
             );
+
+            CREATE TABLE IF NOT EXISTS accounts (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                account_type TEXT NOT NULL CHECK (
+                    account_type IN ('SAVINGS','CURRENT','CREDIT_CARD','CASH','WALLET','INVESTMENT')
+                ),
+                currency TEXT NOT NULL DEFAULT 'INR',
+                opening_balance REAL NOT NULL DEFAULT 0,
+                is_archived INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_accounts_type ON accounts(account_type);
         `;
 
         await this.db.execAsync(createTableSQL);
@@ -113,9 +152,19 @@ class Database {
             console.log('Added Account_type column');
         } catch (error: any) {
             // Ignore error if column already exists
-            // SQLite error for duplicate column is usually "duplicate column name: Account_type"
             if (!error.message?.includes('duplicate column name')) {
                 console.log('Migration note: Account_type column might already exist or failed to add:', error.message);
+            }
+        }
+
+        // Migration: Add account_id column to transactions if it doesn't exist
+        try {
+            await this.db.execAsync('ALTER TABLE transactions ADD COLUMN account_id TEXT');
+            console.log('Added account_id column');
+        } catch (error: any) {
+            // Ignore error if column already exists
+            if (!error.message?.includes('duplicate column name')) {
+                console.log('Migration note: account_id column might already exist or failed to add:', error.message);
             }
         }
 
@@ -127,6 +176,18 @@ class Database {
      */
     private async ensureInit(): Promise<void> {
         if (!this.isInitialized || !this.db) {
+            await this.init();
+            return;
+        }
+
+        // Verify the connection is still valid by trying a simple query
+        try {
+            await this.db.execAsync('SELECT 1');
+        } catch (error) {
+            console.warn('Database connection invalid, reinitializing...');
+            this.isInitialized = false;
+            this.initPromise = null;
+            this.db = null;
             await this.init();
         }
     }
@@ -503,7 +564,167 @@ class Database {
 
         return result.map(r => r.local_id);
     }
+
+    // ==================== ACCOUNT METHODS ====================
+
+    /**
+     * Generate a UUID for accounts
+     */
+    private generateUUID(): string {
+        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+            const r = (Math.random() * 16) | 0;
+            const v = c === 'x' ? r : (r & 0x3) | 0x8;
+            return v.toString(16);
+        });
+    }
+
+    /**
+     * Create a new account
+     */
+    async createAccount(account: Omit<Account, 'id' | 'created_at' | 'updated_at'>): Promise<string> {
+        await this.ensureInit();
+        if (!this.db) throw new Error('Database not initialized');
+
+        const id = this.generateUUID();
+        const now = new Date().toISOString();
+
+        await this.db.runAsync(
+            `INSERT INTO accounts (id, name, account_type, currency, opening_balance, is_archived, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+                id,
+                account.name,
+                account.account_type,
+                account.currency || 'INR',
+                account.opening_balance || 0,
+                account.is_archived || 0,
+                now,
+                now
+            ]
+        );
+
+        return id;
+    }
+
+    /**
+     * Get all accounts (non-archived by default)
+     */
+    async getAccounts(includeArchived: boolean = false): Promise<Account[]> {
+        await this.ensureInit();
+        if (!this.db) throw new Error('Database not initialized');
+
+        let query = 'SELECT * FROM accounts';
+        if (!includeArchived) {
+            query += ' WHERE is_archived = 0';
+        }
+        query += ' ORDER BY name ASC';
+
+        const result = await this.db.getAllAsync<Account>(query);
+        return result;
+    }
+
+    /**
+     * Get a single account by ID
+     */
+    async getAccount(id: string): Promise<Account | null> {
+        await this.ensureInit();
+        if (!this.db) throw new Error('Database not initialized');
+
+        const result = await this.db.getFirstAsync<Account>(
+            'SELECT * FROM accounts WHERE id = ?',
+            [id]
+        );
+
+        return result || null;
+    }
+
+    /**
+     * Update an account
+     */
+    async updateAccount(id: string, updates: Partial<Omit<Account, 'id' | 'created_at'>>): Promise<void> {
+        await this.ensureInit();
+        if (!this.db) throw new Error('Database not initialized');
+
+        const fields: string[] = [];
+        const values: any[] = [];
+
+        Object.entries(updates).forEach(([key, value]) => {
+            if (key !== 'id' && key !== 'created_at') {
+                fields.push(`${key} = ?`);
+                values.push(value);
+            }
+        });
+
+        if (fields.length === 0) return;
+
+        // Always update the updated_at timestamp
+        fields.push('updated_at = ?');
+        values.push(new Date().toISOString());
+
+        values.push(id);
+
+        await this.db.runAsync(
+            `UPDATE accounts SET ${fields.join(', ')} WHERE id = ?`,
+            values
+        );
+    }
+
+    /**
+     * Delete an account
+     */
+    async deleteAccount(id: string): Promise<void> {
+        await this.ensureInit();
+        if (!this.db) throw new Error('Database not initialized');
+
+        await this.db.runAsync('DELETE FROM accounts WHERE id = ?', [id]);
+    }
+
+    /**
+     * Get account balance (opening_balance + sum of transactions)
+     */
+    async getAccountBalance(id: string): Promise<number> {
+        await this.ensureInit();
+        if (!this.db) throw new Error('Database not initialized');
+
+        // Get the account
+        const account = await this.getAccount(id);
+        if (!account) return 0;
+
+        // Get sum of transactions for this account
+        const creditResult = await this.db.getFirstAsync<{ total: number | null }>(
+            'SELECT SUM(Credit) as total FROM transactions WHERE account_id = ?',
+            [id]
+        );
+        const debitResult = await this.db.getFirstAsync<{ total: number | null }>(
+            'SELECT SUM(Debit) as total FROM transactions WHERE account_id = ?',
+            [id]
+        );
+
+        const credits = creditResult?.total || 0;
+        const debits = debitResult?.total || 0;
+
+        return account.opening_balance + credits - debits;
+    }
+
+    /**
+     * Get all accounts with their computed balances
+     */
+    async getAccountsWithBalances(): Promise<Array<Account & { balance: number }>> {
+        await this.ensureInit();
+        if (!this.db) throw new Error('Database not initialized');
+
+        const accounts = await this.getAccounts();
+        const accountsWithBalances = await Promise.all(
+            accounts.map(async (account) => {
+                const balance = await this.getAccountBalance(account.id);
+                return { ...account, balance };
+            })
+        );
+
+        return accountsWithBalances;
+    }
 }
 
 // Create singleton instance
 export const database = new Database();
+

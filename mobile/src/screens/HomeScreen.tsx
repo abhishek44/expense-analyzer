@@ -69,6 +69,12 @@ export default function HomeScreen({ navigation }: Props) {
             icon: '➕',
             onPress: () => navigation.navigate('AddExpense'),
         },
+        {
+            title: 'Accounts',
+            subtitle: 'Manage your accounts',
+            icon: '🏦',
+            onPress: () => navigation.navigate('Accounts'),
+        },
     ];
 
     return (

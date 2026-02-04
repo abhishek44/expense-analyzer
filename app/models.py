@@ -56,6 +56,47 @@ class Transaction(Base):
         }
 
 
+class AccountType(str, Enum):
+    """Account types."""
+    SAVINGS = "SAVINGS"
+    CURRENT = "CURRENT"
+    CREDIT_CARD = "CREDIT_CARD"
+    CASH = "CASH"
+    WALLET = "WALLET"
+    INVESTMENT = "INVESTMENT"
+
+
+class Account(Base):
+    """Financial accounts for tracking balances."""
+    
+    __tablename__ = "accounts"
+    
+    id = Column(String(36), primary_key=True)  # UUID
+    name = Column(String(100), nullable=False)
+    account_type = Column(String(20), nullable=False)
+    currency = Column(String(10), nullable=False, default="INR")
+    opening_balance = Column(Float, nullable=False, default=0)
+    is_archived = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime, nullable=False, default=datetime.now)
+    updated_at = Column(DateTime, nullable=False, default=datetime.now, onupdate=datetime.now)
+    
+    def __repr__(self):
+        return f"<Account(id={self.id}, name={self.name}, type={self.account_type})>"
+    
+    def to_dict(self):
+        """Convert to dictionary for API responses."""
+        return {
+            "id": self.id,
+            "name": self.name,
+            "account_type": self.account_type,
+            "currency": self.currency,
+            "opening_balance": self.opening_balance,
+            "is_archived": self.is_archived,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
 # Column mapping for CSV headers to model fields
 # Strict Column mapping for CSV headers to model fields
 TRANSACTION_COLUMN_MAPPING = {
