@@ -13,13 +13,13 @@ import {
 import { Picker } from '@react-native-picker/picker';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp, useFocusEffect } from '@react-navigation/native';
-import { RootStackParamList } from '../navigation/AppNavigator';
+import { FilesStackParamList } from '../navigation/AppNavigator';
 import { colors, spacing, borderRadius } from '../theme/colors';
 import { api, Transaction } from '../api/client';
 
 type Props = {
-    navigation: NativeStackNavigationProp<RootStackParamList, 'Transactions'>;
-    route: RouteProp<RootStackParamList, 'Transactions'>;
+    navigation: NativeStackNavigationProp<FilesStackParamList, 'Transactions'>;
+    route: RouteProp<FilesStackParamList, 'Transactions'>;
 };
 
 type Filter = '' | 'pending' | 'reviewed';
@@ -268,6 +268,14 @@ export default function TransactionsScreen({ navigation, route }: Props) {
                     }
                 />
             )}
+
+            {/* Floating Action Button */}
+            <TouchableOpacity
+                style={styles.fab}
+                onPress={() => navigation.navigate('AddExpense')}
+            >
+                <Text style={styles.fabIcon}>+</Text>
+            </TouchableOpacity>
         </View>
     );
 }
@@ -310,6 +318,7 @@ const styles = StyleSheet.create({
     list: {
         padding: spacing.md,
         paddingTop: 0,
+        paddingBottom: 100, // Extra padding for FAB
     },
     card: {
         backgroundColor: colors.surfaceDark,
@@ -431,5 +440,26 @@ const styles = StyleSheet.create({
         color: colors.textSecondary,
         fontSize: 12,
         marginTop: 2,
-    }
+    },
+    fab: {
+        position: 'absolute',
+        right: 20,
+        bottom: 20,
+        width: 56,
+        height: 56,
+        borderRadius: 28,
+        backgroundColor: colors.primary,
+        justifyContent: 'center',
+        alignItems: 'center',
+        elevation: 8,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 4,
+    },
+    fabIcon: {
+        fontSize: 28,
+        color: colors.white,
+        fontWeight: 'bold',
+    },
 });

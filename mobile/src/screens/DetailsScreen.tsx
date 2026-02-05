@@ -14,13 +14,13 @@ import {
 import { Picker } from '@react-native-picker/picker';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
-import { RootStackParamList } from '../navigation/AppNavigator';
+import { FilesStackParamList } from '../navigation/AppNavigator';
 import { colors, spacing, borderRadius } from '../theme/colors';
 import { api, Transaction } from '../api/client';
 
 type Props = {
-    navigation: NativeStackNavigationProp<RootStackParamList, 'Details'>;
-    route: RouteProp<RootStackParamList, 'Details'>;
+    navigation: NativeStackNavigationProp<FilesStackParamList, 'Details'>;
+    route: RouteProp<FilesStackParamList, 'Details'>;
 };
 
 const categories = ['-', 'Cashback', 'Ciggerate', 'Clothes', 'Credit Bill', 'Credit card bill', 'Food', 'Grocery', 'Health & Meds', 'Home', 'Investment', 'Milk', 'Personal', 'Petrol', 'Refund', 'Salary', 'Self', 'Transport', 'Trip'];

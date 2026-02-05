@@ -202,6 +202,22 @@ export default function SettingsScreen({ navigation }: Props) {
                 </Text>
             </View>
 
+            {/* Data Management */}
+            <View style={styles.card}>
+                <Text style={styles.cardTitle}>Data Management</Text>
+
+                <TouchableOpacity
+                    style={styles.dataButton}
+                    onPress={() => navigation.navigate('Upload')}
+                >
+                    <Text style={styles.dataButtonIcon}>📤</Text>
+                    <View style={styles.dataButtonContent}>
+                        <Text style={styles.dataButtonTitle}>Upload CSV</Text>
+                        <Text style={styles.dataButtonSubtitle}>Import bank statement</Text>
+                    </View>
+                </TouchableOpacity>
+            </View>
+
             {/* Danger Zone */}
             <View style={styles.card}>
                 <Text style={styles.dangerTitle}>Danger Zone</Text>
@@ -365,5 +381,30 @@ const styles = StyleSheet.create({
         color: colors.textSecondary,
         fontSize: 12,
         marginTop: spacing.xs,
+    },
+    dataButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: colors.backgroundDark,
+        borderRadius: borderRadius.md,
+        padding: spacing.md,
+        marginBottom: spacing.sm,
+    },
+    dataButtonIcon: {
+        fontSize: 24,
+        marginRight: spacing.md,
+    },
+    dataButtonContent: {
+        flex: 1,
+    },
+    dataButtonTitle: {
+        color: colors.textPrimary,
+        fontSize: 14,
+        fontWeight: 'bold',
+    },
+    dataButtonSubtitle: {
+        color: colors.textSecondary,
+        fontSize: 12,
+        marginTop: 2,
     },
 });

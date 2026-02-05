@@ -7,17 +7,11 @@ import {
     ScrollView,
     ActivityIndicator,
 } from 'react-native';
-import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
-import { RootStackParamList } from '../navigation/AppNavigator';
 import { colors, spacing, borderRadius } from '../theme/colors';
 import { api, TableInfo } from '../api/client';
 
-type Props = {
-    navigation: NativeStackNavigationProp<RootStackParamList, 'Home'>;
-};
-
-export default function HomeScreen({ navigation }: Props) {
+export default function HomeScreen() {
     const [stats, setStats] = useState({ pending: 0, reviewed: 0 });
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
@@ -43,50 +37,17 @@ export default function HomeScreen({ navigation }: Props) {
                 });
             }
         } catch (e) {
-            setError('Failed to connect to server');
+            setError('Failed to load data');
             console.error(e);
         } finally {
             setLoading(false);
         }
     };
 
-    const menuItems = [
-        {
-            title: 'Upload CSV',
-            subtitle: 'Import bank statement',
-            icon: '📤',
-            onPress: () => navigation.navigate('Upload'),
-        },
-        {
-            title: 'View Files',
-            subtitle: 'Manage uploaded files',
-            icon: '📁',
-            onPress: () => navigation.navigate('Files'),
-        },
-        {
-            title: 'Add Transaction',
-            subtitle: 'Manual entry',
-            icon: '➕',
-            onPress: () => navigation.navigate('AddExpense'),
-        },
-        {
-            title: 'Accounts',
-            subtitle: 'Manage your accounts',
-            icon: '🏦',
-            onPress: () => navigation.navigate('Accounts'),
-        },
-    ];
-
     return (
         <ScrollView style={styles.container}>
             <View style={styles.header}>
                 <Text style={styles.title}>Dashboard</Text>
-                <TouchableOpacity
-                    style={styles.settingsButton}
-                    onPress={() => navigation.navigate('Settings')}
-                >
-                    <Text style={styles.settingsIcon}>⚙️</Text>
-                </TouchableOpacity>
             </View>
 
             {loading ? (
@@ -115,21 +76,14 @@ export default function HomeScreen({ navigation }: Props) {
                 </View>
             )}
 
-            <View style={styles.menu}>
-                {menuItems.map((item, index) => (
-                    <TouchableOpacity
-                        key={index}
-                        style={styles.menuItem}
-                        onPress={item.onPress}
-                    >
-                        <Text style={styles.menuIcon}>{item.icon}</Text>
-                        <View style={styles.menuText}>
-                            <Text style={styles.menuTitle}>{item.title}</Text>
-                            <Text style={styles.menuSubtitle}>{item.subtitle}</Text>
-                        </View>
-                        <Text style={styles.chevron}>›</Text>
-                    </TouchableOpacity>
-                ))}
+            <View style={styles.infoCard}>
+                <Text style={styles.infoTitle}>Welcome to Expense Tracker</Text>
+                <Text style={styles.infoText}>
+                    Use the bottom tabs to navigate:{'\n'}
+                    • Files: View and manage uploaded files{'\n'}
+                    • Accounts: Manage your financial accounts{'\n'}
+                    • Settings: Configure app settings and upload CSVs
+                </Text>
             </View>
         </ScrollView>
     );
@@ -141,21 +95,12 @@ const styles = StyleSheet.create({
         backgroundColor: colors.backgroundDark,
     },
     header: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
         padding: spacing.md,
     },
     title: {
         fontSize: 24,
         fontWeight: 'bold',
         color: colors.textPrimary,
-    },
-    settingsButton: {
-        padding: spacing.sm,
-    },
-    settingsIcon: {
-        fontSize: 24,
     },
     loader: {
         marginTop: spacing.xl,
@@ -199,35 +144,21 @@ const styles = StyleSheet.create({
         fontWeight: 'bold',
         marginTop: spacing.xs,
     },
-    menu: {
-        padding: spacing.md,
-        gap: spacing.md,
-    },
-    menuItem: {
-        flexDirection: 'row',
-        alignItems: 'center',
+    infoCard: {
+        margin: spacing.md,
         backgroundColor: colors.surfaceDark,
         padding: spacing.md,
         borderRadius: borderRadius.lg,
     },
-    menuIcon: {
-        fontSize: 24,
-        marginRight: spacing.md,
-    },
-    menuText: {
-        flex: 1,
-    },
-    menuTitle: {
+    infoTitle: {
         color: colors.textPrimary,
         fontSize: 16,
         fontWeight: 'bold',
+        marginBottom: spacing.sm,
     },
-    menuSubtitle: {
+    infoText: {
         color: colors.textSecondary,
         fontSize: 14,
-    },
-    chevron: {
-        color: colors.textSecondary,
-        fontSize: 24,
+        lineHeight: 22,
     },
 });

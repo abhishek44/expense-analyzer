@@ -188,14 +188,12 @@
             // Home Dashboard
             home() {
                 return `
-                <div class="flex flex-col min-h-screen">
+                <div class="flex flex-col min-h-screen pb-16">
                     <header class="flex items-center justify-between p-4 border-b border-gray-200 dark:border-border-dark">
                         <h1 class="text-xl font-bold">Expense Tracker</h1>
-                        <button onclick="router.navigate('settings')" class="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700">
-                            <span class="material-symbols-outlined">settings</span>
-                        </button>
                     </header>
                     <main class="flex-1 p-4 space-y-4">
+                        <h2 class="text-lg font-bold">Dashboard</h2>
                         <div id="statsGrid" class="grid grid-cols-2 gap-3">
                             <div class="bg-white dark:bg-surface-dark p-4 rounded-xl">
                                 <p class="text-text-secondary text-sm">Pending</p>
@@ -207,25 +205,33 @@
                             </div>
                         </div>
                         
-                        <div class="space-y-3">
-                            <button onclick="router.navigate('upload')" class="w-full flex items-center gap-4 p-4 bg-white dark:bg-surface-dark rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700">
-                                <span class="material-symbols-outlined text-primary">upload_file</span>
-                                <div class="text-left"><p class="font-bold">Upload CSV</p><p class="text-sm text-text-secondary">Import bank statement</p></div>
-                            </button>
-                            <button onclick="router.navigate('files')" class="w-full flex items-center gap-4 p-4 bg-white dark:bg-surface-dark rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700">
-                                <span class="material-symbols-outlined text-primary">folder</span>
-                                <div class="text-left"><p class="font-bold">View Files</p><p class="text-sm text-text-secondary">Manage uploaded files</p></div>
-                            </button>
-                            <button onclick="router.navigate('addExpense')" class="w-full flex items-center gap-4 p-4 bg-white dark:bg-surface-dark rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700">
-                                <span class="material-symbols-outlined text-primary">add_circle</span>
-                                <div class="text-left"><p class="font-bold">Add Transaction</p><p class="text-sm text-text-secondary">Manual entry</p></div>
-                            </button>
-                            <button onclick="router.navigate('accounts')" class="w-full flex items-center gap-4 p-4 bg-white dark:bg-surface-dark rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700">
-                                <span class="material-symbols-outlined text-primary">account_balance</span>
-                                <div class="text-left"><p class="font-bold">Accounts</p><p class="text-sm text-text-secondary">Manage your accounts</p></div>
-                            </button>
+                        <div class="bg-white dark:bg-surface-dark p-4 rounded-xl">
+                            <h3 class="font-bold mb-2">Welcome to Expense Tracker</h3>
+                            <p class="text-text-secondary text-sm">Use the bottom tabs to navigate between sections.</p>
                         </div>
                     </main>
+                    
+                    <!-- Bottom Navigation -->
+                    <nav class="fixed bottom-0 left-0 right-0 bg-surface-dark border-t border-border-dark">
+                        <div class="flex justify-around py-2">
+                            <button onclick="router.navigate('home')" class="flex flex-col items-center p-2 text-primary">
+                                <span class="material-symbols-outlined">home</span>
+                                <span class="text-xs mt-1">Home</span>
+                            </button>
+                            <button onclick="router.navigate('files')" class="flex flex-col items-center p-2 text-text-secondary hover:text-primary">
+                                <span class="material-symbols-outlined">folder</span>
+                                <span class="text-xs mt-1">Files</span>
+                            </button>
+                            <button onclick="router.navigate('accounts')" class="flex flex-col items-center p-2 text-text-secondary hover:text-primary">
+                                <span class="material-symbols-outlined">account_balance</span>
+                                <span class="text-xs mt-1">Accounts</span>
+                            </button>
+                            <button onclick="router.navigate('settings')" class="flex flex-col items-center p-2 text-text-secondary hover:text-primary">
+                                <span class="material-symbols-outlined">settings</span>
+                                <span class="text-xs mt-1">Settings</span>
+                            </button>
+                        </div>
+                    </nav>
                 </div>`;
             },
             async initHome() {
@@ -313,16 +319,40 @@
             // Files List Screen
             files() {
                 return `
-                <div class="flex flex-col min-h-screen">
+                <div class="flex flex-col min-h-screen pb-16">
                     <header class="flex items-center p-4 border-b border-gray-200 dark:border-border-dark">
-                        <button onclick="router.navigate('home')" class="p-2 -ml-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700">
-                            <span class="material-symbols-outlined">arrow_back</span>
-                        </button>
-                        <h1 class="text-lg font-bold ml-2">Uploaded Files</h1>
+                        <h1 class="text-lg font-bold">Uploaded Files</h1>
                     </header>
-                    <main id="filesList" class="flex-1 p-4 space-y-3">
+                    <main id="filesList" class="flex-1 p-4 space-y-3 pb-20">
                         <div class="flex justify-center py-8"><div class="size-8 border-2 border-primary/30 border-t-primary rounded-full animate-spin"></div></div>
                     </main>
+                    
+                    <!-- FAB -->
+                    <button onclick="router.navigate('addExpense')" class="fixed bottom-20 right-4 w-14 h-14 bg-primary text-white rounded-full shadow-lg flex items-center justify-center hover:bg-primary/90 z-10">
+                        <span class="material-symbols-outlined text-3xl">add</span>
+                    </button>
+                    
+                    <!-- Bottom Navigation -->
+                    <nav class="fixed bottom-0 left-0 right-0 bg-surface-dark border-t border-border-dark">
+                        <div class="flex justify-around py-2">
+                            <button onclick="router.navigate('home')" class="flex flex-col items-center p-2 text-text-secondary hover:text-primary">
+                                <span class="material-symbols-outlined">home</span>
+                                <span class="text-xs mt-1">Home</span>
+                            </button>
+                            <button onclick="router.navigate('files')" class="flex flex-col items-center p-2 text-primary">
+                                <span class="material-symbols-outlined">folder</span>
+                                <span class="text-xs mt-1">Files</span>
+                            </button>
+                            <button onclick="router.navigate('accounts')" class="flex flex-col items-center p-2 text-text-secondary hover:text-primary">
+                                <span class="material-symbols-outlined">account_balance</span>
+                                <span class="text-xs mt-1">Accounts</span>
+                            </button>
+                            <button onclick="router.navigate('settings')" class="flex flex-col items-center p-2 text-text-secondary hover:text-primary">
+                                <span class="material-symbols-outlined">settings</span>
+                                <span class="text-xs mt-1">Settings</span>
+                            </button>
+                        </div>
+                    </nav>
                 </div>`;
             },
             async initFiles() {
@@ -373,7 +403,7 @@
             list() {
                 const { status, accountName, accountType } = appState.filters;
                 return `
-                <div class="flex flex-col min-h-screen">
+                <div class="flex flex-col min-h-screen pb-16">
                     <header class="sticky top-0 z-10 bg-background-light dark:bg-background-dark border-b border-gray-200 dark:border-border-dark">
                         <div class="flex items-center p-4">
                             <button onclick="router.navigate('files')" class="p-2 -ml-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700">
@@ -397,9 +427,36 @@
                            </select>
                         </div>
                     </header>
-                    <main id="statementsList" class="flex-1 p-4 space-y-3">
+                    <main id="statementsList" class="flex-1 p-4 space-y-3 pb-20">
                         <div class="flex justify-center py-8"><div class="size-8 border-2 border-primary/30 border-t-primary rounded-full animate-spin"></div></div>
                     </main>
+
+                    <!-- FAB -->
+                    <button onclick="router.navigate('addExpense')" class="fixed bottom-20 right-4 w-14 h-14 bg-primary text-white rounded-full shadow-lg flex items-center justify-center hover:bg-primary/90 z-20">
+                        <span class="material-symbols-outlined text-3xl">add</span>
+                    </button>
+
+                    <!-- Bottom Navigation -->
+                    <nav class="fixed bottom-0 left-0 right-0 bg-surface-dark border-t border-border-dark z-50">
+                        <div class="flex justify-around py-2">
+                            <button onclick="router.navigate('home')" class="flex flex-col items-center p-2 text-text-secondary hover:text-primary">
+                                <span class="material-symbols-outlined">home</span>
+                                <span class="text-xs mt-1">Home</span>
+                            </button>
+                            <button onclick="router.navigate('files')" class="flex flex-col items-center p-2 text-primary">
+                                <span class="material-symbols-outlined">folder</span>
+                                <span class="text-xs mt-1">Files</span>
+                            </button>
+                            <button onclick="router.navigate('accounts')" class="flex flex-col items-center p-2 text-text-secondary hover:text-primary">
+                                <span class="material-symbols-outlined">account_balance</span>
+                                <span class="text-xs mt-1">Accounts</span>
+                            </button>
+                            <button onclick="router.navigate('settings')" class="flex flex-col items-center p-2 text-text-secondary hover:text-primary">
+                                <span class="material-symbols-outlined">settings</span>
+                                <span class="text-xs mt-1">Settings</span>
+                            </button>
+                        </div>
+                    </nav>
                 </div>`;
             },
             async initList() {
@@ -721,20 +778,46 @@
             // Settings Screen
             settings() {
                 return `
-            < div class="flex flex-col min-h-screen" >
+                <div class="flex flex-col min-h-screen pb-16">
                     <header class="flex items-center p-4 border-b border-gray-200 dark:border-border-dark">
-                        <button onclick="router.navigate('home')" class="p-2 -ml-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700">
-                            <span class="material-symbols-outlined">arrow_back</span>
-                        </button>
-                        <h1 class="text-lg font-bold ml-2">Settings</h1>
+                        <h1 class="text-lg font-bold">Settings</h1>
                     </header>
                     <main class="flex-1 p-4 space-y-4">
+                        <div class="bg-white dark:bg-surface-dark p-4 rounded-xl">
+                            <h3 class="font-bold mb-3">Data Management</h3>
+                            <button onclick="router.navigate('upload')" class="w-full flex items-center gap-4 p-3 bg-background-dark rounded-lg hover:bg-gray-700">
+                                <span class="material-symbols-outlined text-primary">upload_file</span>
+                                <div class="text-left"><p class="font-bold">Upload CSV</p><p class="text-sm text-text-secondary">Import bank statement</p></div>
+                            </button>
+                        </div>
                         <div class="bg-white dark:bg-surface-dark p-4 rounded-xl">
                             <h3 class="font-bold mb-3 text-red-500">Danger Zone</h3>
                             <button id="clearTransactionsBtn" class="w-full h-10 bg-red-100 dark:bg-red-900/30 text-red-600 font-bold rounded-lg">Clear All Transactions</button>
                         </div>
                     </main>
-                </div >`;
+
+                    <!-- Bottom Navigation -->
+                    <nav class="fixed bottom-0 left-0 right-0 bg-surface-dark border-t border-border-dark z-50">
+                        <div class="flex justify-around py-2">
+                            <button onclick="router.navigate('home')" class="flex flex-col items-center p-2 text-text-secondary hover:text-primary">
+                                <span class="material-symbols-outlined">home</span>
+                                <span class="text-xs mt-1">Home</span>
+                            </button>
+                            <button onclick="router.navigate('files')" class="flex flex-col items-center p-2 text-text-secondary hover:text-primary">
+                                <span class="material-symbols-outlined">folder</span>
+                                <span class="text-xs mt-1">Files</span>
+                            </button>
+                            <button onclick="router.navigate('accounts')" class="flex flex-col items-center p-2 text-text-secondary hover:text-primary">
+                                <span class="material-symbols-outlined">account_balance</span>
+                                <span class="text-xs mt-1">Accounts</span>
+                            </button>
+                            <button onclick="router.navigate('settings')" class="flex flex-col items-center p-2 text-primary">
+                                <span class="material-symbols-outlined">settings</span>
+                                <span class="text-xs mt-1">Settings</span>
+                            </button>
+                        </div>
+                    </nav>
+                </div>`;
             },
             initSettings() {
                 document.getElementById('clearTransactionsBtn').onclick = async () => {
@@ -749,21 +832,40 @@
             // Accounts Screen
             accounts() {
                 return `
-                <div class="flex flex-col min-h-screen">
+                <div class="flex flex-col min-h-screen pb-16">
                     <header class="flex items-center p-4 border-b border-gray-200 dark:border-border-dark">
-                        <button onclick="router.navigate('home')" class="p-2 -ml-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700">
-                            <span class="material-symbols-outlined">arrow_back</span>
-                        </button>
-                        <h1 class="text-lg font-bold ml-2">Accounts</h1>
+                        <h1 class="text-lg font-bold">Accounts</h1>
                     </header>
                     <main id="accountsList" class="flex-1 p-4 space-y-3">
                         <div class="flex justify-center py-8"><div class="size-8 border-2 border-primary/30 border-t-primary rounded-full animate-spin"></div></div>
                     </main>
-                    <footer class="p-4 pb-8">
+                    <footer class="p-4 pb-4">
                         <button onclick="screens.openAccountModal()" class="w-full h-12 bg-surface-dark border border-border-dark text-white font-bold rounded-xl flex items-center justify-center gap-2 hover:bg-gray-700">
                             <span class="material-symbols-outlined">add_circle</span> ADD NEW ACCOUNT
                         </button>
                     </footer>
+
+                    <!-- Bottom Navigation -->
+                    <nav class="fixed bottom-0 left-0 right-0 bg-surface-dark border-t border-border-dark z-50">
+                        <div class="flex justify-around py-2">
+                            <button onclick="router.navigate('home')" class="flex flex-col items-center p-2 text-text-secondary hover:text-primary">
+                                <span class="material-symbols-outlined">home</span>
+                                <span class="text-xs mt-1">Home</span>
+                            </button>
+                            <button onclick="router.navigate('files')" class="flex flex-col items-center p-2 text-text-secondary hover:text-primary">
+                                <span class="material-symbols-outlined">folder</span>
+                                <span class="text-xs mt-1">Files</span>
+                            </button>
+                            <button onclick="router.navigate('accounts')" class="flex flex-col items-center p-2 text-primary">
+                                <span class="material-symbols-outlined">account_balance</span>
+                                <span class="text-xs mt-1">Accounts</span>
+                            </button>
+                            <button onclick="router.navigate('settings')" class="flex flex-col items-center p-2 text-text-secondary hover:text-primary">
+                                <span class="material-symbols-outlined">settings</span>
+                                <span class="text-xs mt-1">Settings</span>
+                            </button>
+                        </div>
+                    </nav>
                 </div>
                 
                 <!-- Account Modal -->

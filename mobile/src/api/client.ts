@@ -24,6 +24,7 @@ export interface UploadedFile {
     pending_count: number;
     reviewed_count: number;
     account_name: string | null;
+    account_type: string | null;
     uploaded_at: string | null;
 }
 
@@ -178,6 +179,7 @@ class ApiClient {
                 pending_count: f.pending_count,
                 reviewed_count: f.reviewed_count,
                 account_name: null,
+                account_type: null,
                 uploaded_at: f.uploaded_at,
             })),
         };
