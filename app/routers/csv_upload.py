@@ -146,6 +146,7 @@ async def get_transactions(
     filename_filter: Optional[str] = None,
     account_name: Optional[str] = None,
     account_type: Optional[str] = None,
+    category_id: Optional[str] = None,
     db: Session = Depends(get_db)
 ) -> dict:
     """Get transactions with pagination and optional filters."""
@@ -162,6 +163,9 @@ async def get_transactions(
 
     if account_type:
         query = query.filter(Transaction.Account_type.ilike(f"%{account_type}%"))
+    
+    if category_id:
+        query = query.filter(Transaction.category_id == category_id)
     
     total = query.count()
     records = query.order_by(Transaction.Id.desc()).offset(skip).limit(limit).all()

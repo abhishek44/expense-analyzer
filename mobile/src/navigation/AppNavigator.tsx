@@ -12,6 +12,7 @@ import DetailsScreen from '../screens/DetailsScreen';
 import AddExpenseScreen from '../screens/AddExpenseScreen';
 import SettingsScreen from '../screens/SettingsScreen';
 import AccountsScreen from '../screens/AccountsScreen';
+import CategoriesScreen from '../screens/CategoriesScreen';
 import { colors } from '../theme/colors';
 
 // Stack param lists
@@ -45,6 +46,7 @@ export type RootStackParamList = {
     AddExpense: undefined;
     Settings: undefined;
     Accounts: undefined;
+    Categories: undefined;
     // Internal Stack Screens
     SettingsMain: undefined;
     FilesList: undefined;
@@ -74,6 +76,7 @@ function TabIcon({ name, focused }: { name: string; focused: boolean }) {
         Home: '🏠',
         Files: '📁',
         Accounts: '🏦',
+        Categories: '🏷️',
         Settings: '⚙️',
     };
     return (
@@ -180,6 +183,13 @@ export default function AppNavigator() {
                     component={AccountsScreen}
                     options={{
                         title: 'Accounts',
+                    }}
+                />
+                <Tab.Screen
+                    name="Categories"
+                    component={CategoriesScreen}
+                    options={{
+                        title: 'Categories',
                     }}
                 />
                 <Tab.Screen

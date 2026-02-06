@@ -16,14 +16,14 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
 import { FilesStackParamList } from '../navigation/AppNavigator';
 import { colors, spacing, borderRadius } from '../theme/colors';
-import { api, Transaction } from '../api/client';
+import { api, Transaction, Category } from '../api/client';
 
 type Props = {
     navigation: NativeStackNavigationProp<FilesStackParamList, 'Details'>;
     route: RouteProp<FilesStackParamList, 'Details'>;
 };
 
-const categories = ['-', 'Cashback', 'Ciggerate', 'Clothes', 'Credit Bill', 'Credit card bill', 'Food', 'Grocery', 'Health & Meds', 'Home', 'Investment', 'Milk', 'Personal', 'Petrol', 'Refund', 'Salary', 'Self', 'Transport', 'Trip'];
+
 
 export default function DetailsScreen({ navigation, route }: Props) {
     const { id } = route.params;
@@ -32,25 +32,48 @@ export default function DetailsScreen({ navigation, route }: Props) {
     const [submitting, setSubmitting] = useState(false);
 
     // Form state
-    const [category, setCategory] = useState('Food');
+    const [categories, setCategories] = useState<Category[]>([]);
+    const [selectedCategoryId, setSelectedCategoryId] = useState<string>('');
+    const [categoryName, setCategoryName] = useState(''); // Fallback for display or legacy
     const [notes, setNotes] = useState('');
 
     useEffect(() => {
-        loadTransaction();
+        loadData();
     }, [id]);
 
-    const loadTransaction = async () => {
+    const loadData = async () => {
         try {
             setLoading(true);
-            const data = await api.getTransaction(id);
-            setTransaction(data);
+            const [trxData, catsData] = await Promise.all([
+                api.getTransaction(id),
+                api.getCategories() // Fetch all or filter? For review, maybe all.
+            ]);
 
-            // Pre-fill if already has category/notes
-            if (data.Category) setCategory(data.Category);
-            if (data.Notes) setNotes(data.Notes);
-            else setNotes(data.Details || '');
+            setCategories(catsData);
+            setTransaction(trxData);
+
+            // Pre-fill
+            if (trxData.category_id) {
+                setSelectedCategoryId(trxData.category_id);
+                // Find name
+                const cat = catsData.find(c => c.id === trxData.category_id);
+                if (cat) setCategoryName(cat.name);
+            } else if (trxData.Category) {
+                // Try to find by name
+                const cat = catsData.find(c => c.name === trxData.Category);
+                if (cat) {
+                    setSelectedCategoryId(cat.id);
+                    setCategoryName(cat.name);
+                } else {
+                    // Legacy text only?
+                    setCategoryName(trxData.Category);
+                }
+            }
+
+            if (trxData.Notes) setNotes(trxData.Notes);
+            else setNotes(trxData.Details || '');
         } catch (e) {
-            Alert.alert('Error', 'Failed to load transaction');
+            Alert.alert('Error', 'Failed to load data');
             console.error(e);
         } finally {
             setLoading(false);
@@ -60,8 +83,13 @@ export default function DetailsScreen({ navigation, route }: Props) {
     const handleReview = async () => {
         setSubmitting(true);
         try {
+            // Find category name from ID
+            const selectedCat = categories.find(c => c.id === selectedCategoryId);
+            const catName = selectedCat ? selectedCat.name : categoryName;
+
             const result = await api.reviewTransaction(id, {
-                Category: category,
+                Category: catName,
+                categoryId: selectedCategoryId,
                 Notes: notes,
             });
 
@@ -149,12 +177,18 @@ export default function DetailsScreen({ navigation, route }: Props) {
                         <Text style={styles.fieldLabel}>Category</Text>
                         <View style={styles.pickerContainer}>
                             <Picker
-                                selectedValue={category}
-                                onValueChange={(itemValue) => setCategory(itemValue)}
+                                selectedValue={selectedCategoryId}
+                                onValueChange={(itemValue) => {
+                                    setSelectedCategoryId(itemValue);
+                                    // Also update name for display
+                                    const cat = categories.find(c => c.id === itemValue);
+                                    if (cat) setCategoryName(cat.name);
+                                }}
                                 style={styles.picker}
                             >
+                                <Picker.Item label="- Select Category -" value="" />
                                 {categories.map((cat) => (
-                                    <Picker.Item key={cat} label={cat} value={cat} />
+                                    <Picker.Item key={cat.id} label={cat.name} value={cat.id} />
                                 ))}
                             </Picker>
                         </View>

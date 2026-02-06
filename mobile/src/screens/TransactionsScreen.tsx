@@ -15,7 +15,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp, useFocusEffect } from '@react-navigation/native';
 import { FilesStackParamList } from '../navigation/AppNavigator';
 import { colors, spacing, borderRadius } from '../theme/colors';
-import { api, Transaction } from '../api/client';
+import { api, Transaction, Category } from '../api/client';
 
 type Props = {
     navigation: NativeStackNavigationProp<FilesStackParamList, 'Transactions'>;
@@ -33,6 +33,8 @@ export default function TransactionsScreen({ navigation, route }: Props) {
 
     const [accountName, setAccountName] = useState('');
     const [accountType, setAccountType] = useState('');
+    const [categoryId, setCategoryId] = useState('');
+    const [categories, setCategories] = useState<Category[]>([]);
     const [showFilters, setShowFilters] = useState(false);
     const [filterOptions, setFilterOptions] = useState<{ accountNames: string[]; accountTypes: string[] }>({ accountNames: [], accountTypes: [] });
 
@@ -44,15 +46,19 @@ export default function TransactionsScreen({ navigation, route }: Props) {
 
     useEffect(() => {
         loadStatements();
-    }, [filter, filename, accountName, accountType]);
+    }, [filter, filename, accountName, accountType, categoryId]);
 
     // Scroll tracking
     const scrollOffset = React.useRef(0);
 
     const loadFilterOptions = async () => {
         try {
-            const opts = await api.getFilterOptions();
+            const [opts, cats] = await Promise.all([
+                api.getFilterOptions(),
+                api.getCategories()
+            ]);
             setFilterOptions(opts);
+            setCategories(cats);
 
             // Stale selection check
             if (accountName && !opts.accountNames.includes(accountName)) {
@@ -61,6 +67,7 @@ export default function TransactionsScreen({ navigation, route }: Props) {
             if (accountType && !opts.accountTypes.includes(accountType)) {
                 setAccountType('');
             }
+            // Category check if needed, but IDs are stable usually
         } catch (e) {
             console.error('Failed to load filter options');
         }
@@ -77,7 +84,8 @@ export default function TransactionsScreen({ navigation, route }: Props) {
                 filter || undefined,
                 filename,
                 accountName || undefined,
-                accountType || undefined
+                accountType || undefined,
+                categoryId || undefined
             );
 
             // Ignore stale responses
@@ -211,6 +219,22 @@ export default function TransactionsScreen({ navigation, route }: Props) {
                             </View>
                         </View>
 
+                        <View style={styles.pickerWrapper}>
+                            <Text style={styles.label}>Category</Text>
+                            <View style={styles.pickerContainer}>
+                                <Picker
+                                    selectedValue={categoryId}
+                                    onValueChange={(val) => setCategoryId(val)}
+                                    style={styles.picker}
+                                >
+                                    <Picker.Item label="All Categories" value="" />
+                                    {categories.map(c => (
+                                        <Picker.Item key={c.id} label={c.name} value={c.id} />
+                                    ))}
+                                </Picker>
+                            </View>
+                        </View>
+
                         <TouchableOpacity style={styles.applyButton} onPress={() => loadStatements()}>
                             <Text style={styles.applyButtonText}>Apply Filters</Text>
                         </TouchableOpacity>
@@ -239,6 +263,7 @@ export default function TransactionsScreen({ navigation, route }: Props) {
                                     setFilter('');
                                     setAccountName('');
                                     setAccountType('');
+                                    setCategoryId('');
                                     // loadStatements will trigger via useEffect dependency if we added it,
                                     // but currently we manually trigger it elsewhere or rely on effect. 
                                     // Since effect has [filter], clearing filter triggers reload.

@@ -64,7 +64,8 @@
             filters: {
                 status: '',
                 accountName: '',
-                accountType: ''
+                accountType: '',
+                categoryId: ''
             },
             currentRequestToken: 0
         };
@@ -77,12 +78,13 @@
                 const res = await fetch(`${API_BASE}/upload-csv`, { method: 'POST', body: formData });
                 return res.json();
             },
-            async getTransactions(status = null, filename = null, accountName = null, accountType = null) {
+            async getTransactions(status = null, filename = null, accountName = null, accountType = null, categoryId = null) {
                 let url = `${API_BASE}/transactions?limit=500`;
                 if (status) url += `&status_filter=${status}`;
                 if (filename) url += `&filename_filter=${encodeURIComponent(filename)}`;
                 if (accountName) url += `&account_name=${encodeURIComponent(accountName)}`;
                 if (accountType) url += `&account_type=${encodeURIComponent(accountType)}`;
+                if (categoryId) url += `&category_id=${encodeURIComponent(categoryId)}`;
                 const res = await fetch(url);
                 return res.json();
             },
@@ -158,6 +160,26 @@
             async getAccountTypes() {
                 const res = await fetch(`${API_BASE}/account-types`);
                 return res.json();
+            },
+            // Categories API
+            async getCategories(type = null) {
+                let url = `${API_BASE}/categories`;
+                if (type) url += `?type=${type}`;
+                const res = await fetch(url);
+                return res.json();
+            },
+            async createCategory(data) {
+                const res = await fetch(`${API_BASE}/categories`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                });
+                return res.json();
+            },
+            async deleteCategory(id) {
+                const res = await fetch(`${API_BASE}/categories/${id}`, { method: 'DELETE' });
+                if (res.status === 204) return { success: true };
+                return res.json();
             }
         };
 
@@ -180,11 +202,32 @@
                     case 'addExpense': app.innerHTML = screens.addExpense(); screens.initAddExpense(); break;
                     case 'settings': app.innerHTML = screens.settings(); screens.initSettings(); break;
                     case 'accounts': app.innerHTML = screens.accounts(); screens.initAccounts(); break;
+                    case 'categories': app.innerHTML = screens.categories(); screens.initCategories(); break;
+                    case 'addCategory': app.innerHTML = screens.addCategory(); screens.initAddCategory(); break;
                 }
             }
         };
 
         const screens = {
+            renderNav(active) {
+                const navItem = (route, icon, label) => `
+                    <button onclick="router.navigate('${route}')" class="flex flex-col items-center p-2 ${active === route ? 'text-primary' : 'text-text-secondary hover:text-primary'}">
+                        <span class="material-symbols-outlined">${icon}</span>
+                        <span class="text-xs mt-1">${label}</span>
+                    </button>
+                `;
+                return `
+                <nav class="fixed bottom-0 left-0 right-0 bg-surface-dark border-t border-border-dark z-50">
+                    <div class="flex justify-around py-2">
+                        ${navItem('home', 'home', 'Home')}
+                        ${navItem('files', 'folder', 'Files')}
+                        ${navItem('accounts', 'account_balance', 'Accounts')}
+                        ${navItem('categories', 'category', 'Categories')}
+                        ${navItem('settings', 'settings', 'Settings')}
+                    </div>
+                </nav>`;
+            },
+
             // Home Dashboard
             home() {
                 return `
@@ -212,26 +255,7 @@
                     </main>
                     
                     <!-- Bottom Navigation -->
-                    <nav class="fixed bottom-0 left-0 right-0 bg-surface-dark border-t border-border-dark">
-                        <div class="flex justify-around py-2">
-                            <button onclick="router.navigate('home')" class="flex flex-col items-center p-2 text-primary">
-                                <span class="material-symbols-outlined">home</span>
-                                <span class="text-xs mt-1">Home</span>
-                            </button>
-                            <button onclick="router.navigate('files')" class="flex flex-col items-center p-2 text-text-secondary hover:text-primary">
-                                <span class="material-symbols-outlined">folder</span>
-                                <span class="text-xs mt-1">Files</span>
-                            </button>
-                            <button onclick="router.navigate('accounts')" class="flex flex-col items-center p-2 text-text-secondary hover:text-primary">
-                                <span class="material-symbols-outlined">account_balance</span>
-                                <span class="text-xs mt-1">Accounts</span>
-                            </button>
-                            <button onclick="router.navigate('settings')" class="flex flex-col items-center p-2 text-text-secondary hover:text-primary">
-                                <span class="material-symbols-outlined">settings</span>
-                                <span class="text-xs mt-1">Settings</span>
-                            </button>
-                        </div>
-                    </nav>
+                    ${this.renderNav('home')}
                 </div>`;
             },
             async initHome() {
@@ -333,26 +357,7 @@
                     </button>
                     
                     <!-- Bottom Navigation -->
-                    <nav class="fixed bottom-0 left-0 right-0 bg-surface-dark border-t border-border-dark">
-                        <div class="flex justify-around py-2">
-                            <button onclick="router.navigate('home')" class="flex flex-col items-center p-2 text-text-secondary hover:text-primary">
-                                <span class="material-symbols-outlined">home</span>
-                                <span class="text-xs mt-1">Home</span>
-                            </button>
-                            <button onclick="router.navigate('files')" class="flex flex-col items-center p-2 text-primary">
-                                <span class="material-symbols-outlined">folder</span>
-                                <span class="text-xs mt-1">Files</span>
-                            </button>
-                            <button onclick="router.navigate('accounts')" class="flex flex-col items-center p-2 text-text-secondary hover:text-primary">
-                                <span class="material-symbols-outlined">account_balance</span>
-                                <span class="text-xs mt-1">Accounts</span>
-                            </button>
-                            <button onclick="router.navigate('settings')" class="flex flex-col items-center p-2 text-text-secondary hover:text-primary">
-                                <span class="material-symbols-outlined">settings</span>
-                                <span class="text-xs mt-1">Settings</span>
-                            </button>
-                        </div>
-                    </nav>
+                    ${this.renderNav('files')}
                 </div>`;
             },
             async initFiles() {
@@ -377,7 +382,7 @@
                                 <span class="text-yellow-500">${f.pending_count} pending</span>
                                 <span class="text-green-500">${f.reviewed_count} reviewed</span>
                             </div>
-                            <button onclick="selectedFile='${f.filename.replace(/'/g, "\\'")}'; router.navigate('list')" class="mt-3 w-full h-10 bg-primary text-white font-bold rounded-lg">
+                            <button onclick="selectedFile='${f.filename.replace(/'/g, "\\'")}'; appState.listScroll = 0; router.navigate('list')" class="mt-3 w-full h-10 bg-primary text-white font-bold rounded-lg">
                                 View Transactions
                             </button>
                         </div>
@@ -425,6 +430,9 @@
                            <select id="filterAccountType" class="flex-1 h-9 px-3 rounded-lg border border-gray-200 dark:border-border-dark bg-white dark:bg-surface-dark text-sm">
                                <option value="">All Types</option>
                            </select>
+                           <select id="filterCategory" class="flex-1 h-9 px-3 rounded-lg border border-gray-200 dark:border-border-dark bg-white dark:bg-surface-dark text-sm">
+                               <option value="">All Categories</option>
+                           </select>
                         </div>
                     </header>
                     <main id="statementsList" class="flex-1 p-4 space-y-3 pb-20">
@@ -437,35 +445,17 @@
                     </button>
 
                     <!-- Bottom Navigation -->
-                    <nav class="fixed bottom-0 left-0 right-0 bg-surface-dark border-t border-border-dark z-50">
-                        <div class="flex justify-around py-2">
-                            <button onclick="router.navigate('home')" class="flex flex-col items-center p-2 text-text-secondary hover:text-primary">
-                                <span class="material-symbols-outlined">home</span>
-                                <span class="text-xs mt-1">Home</span>
-                            </button>
-                            <button onclick="router.navigate('files')" class="flex flex-col items-center p-2 text-primary">
-                                <span class="material-symbols-outlined">folder</span>
-                                <span class="text-xs mt-1">Files</span>
-                            </button>
-                            <button onclick="router.navigate('accounts')" class="flex flex-col items-center p-2 text-text-secondary hover:text-primary">
-                                <span class="material-symbols-outlined">account_balance</span>
-                                <span class="text-xs mt-1">Accounts</span>
-                            </button>
-                            <button onclick="router.navigate('settings')" class="flex flex-col items-center p-2 text-text-secondary hover:text-primary">
-                                <span class="material-symbols-outlined">settings</span>
-                                <span class="text-xs mt-1">Settings</span>
-                            </button>
-                        </div>
-                    </nav>
+                    ${this.renderNav('list')}
                 </div>`;
             },
             async initList() {
-                let currentStatus = '';
-
                 try {
                     const options = await api.getFilterOptions();
 
                     const nameSelect = document.getElementById('filterAccountName');
+                    // Clear existing options except first
+                    while (nameSelect.options.length > 1) nameSelect.remove(1);
+
                     options.account_names.forEach(name => {
                         const opt = document.createElement('option');
                         opt.value = name;
@@ -474,6 +464,9 @@
                     });
 
                     const typeSelect = document.getElementById('filterAccountType');
+                    // Clear existing options except first
+                    while (typeSelect.options.length > 1) typeSelect.remove(1);
+
                     options.account_types.forEach(type => {
                         const opt = document.createElement('option');
                         opt.value = type;
@@ -481,8 +474,37 @@
                         typeSelect.appendChild(opt);
                     });
 
-                    nameSelect.onchange = () => this.loadStatements(currentStatus);
-                    typeSelect.onchange = () => this.loadStatements(currentStatus);
+                    // Set initial values from state
+                    nameSelect.value = appState.filters.accountName || '';
+                    typeSelect.value = appState.filters.accountType || '';
+
+                    nameSelect.onchange = () => {
+                        appState.filters.accountName = nameSelect.value;
+                        appState.listScroll = 0;
+                        this.loadStatements();
+                    };
+                    typeSelect.onchange = () => {
+                        appState.filters.accountType = typeSelect.value;
+                        appState.listScroll = 0;
+                        this.loadStatements();
+                    };
+
+                    // Category filter
+                    const categories = await api.getCategories();
+                    const catSelect = document.getElementById('filterCategory');
+                    while (catSelect.options.length > 1) catSelect.remove(1);
+                    categories.forEach(cat => {
+                        const opt = document.createElement('option');
+                        opt.value = cat.id;
+                        opt.textContent = cat.name;
+                        catSelect.appendChild(opt);
+                    });
+                    catSelect.value = appState.filters.categoryId || '';
+                    catSelect.onchange = () => {
+                        appState.filters.categoryId = catSelect.value;
+                        appState.listScroll = 0;
+                        this.loadStatements();
+                    };
                 } catch (e) { console.error(e); }
 
                 document.querySelectorAll('.filter-chip').forEach(chip => {
@@ -493,25 +515,26 @@
                         });
                         chip.classList.add('active', 'bg-primary', 'text-white');
                         chip.classList.remove('bg-white', 'dark:bg-surface-dark', 'border');
-                        currentStatus = chip.dataset.filter;
-                        this.loadStatements(currentStatus);
+
+                        appState.filters.status = chip.dataset.filter;
+                        appState.listScroll = 0;
+                        this.loadStatements();
                     };
                 });
 
-
-
                 await this.loadStatements();
+                if (appState.listScroll) window.scrollTo(0, appState.listScroll);
             },
             async loadStatements() {
                 const list = document.getElementById('statementsList');
                 if (!list) return;
 
-                const { status, accountName, accountType } = appState.filters;
+                const { status, accountName, accountType, categoryId } = appState.filters;
                 const requestToken = ++appState.currentRequestToken;
 
                 list.innerHTML = '<div class="flex justify-center py-8"><div class="size-8 border-2 border-primary/30 border-t-primary rounded-full animate-spin"></div></div>';
                 try {
-                    const data = await api.getTransactions(status, selectedFile, accountName, accountType);
+                    const data = await api.getTransactions(status, selectedFile, accountName, accountType, categoryId);
 
                     // Race condition check: ignore if newer request started
                     if (requestToken !== appState.currentRequestToken) return;
@@ -528,7 +551,7 @@
                     }
 
                     list.innerHTML = data.data.map(t => `
-                        <div onclick="router.navigate('details', {id: ${t.Id}})" class="bg-white dark:bg-surface-dark p-4 rounded-xl cursor-pointer hover:shadow-md transition-shadow">
+                        <div onclick="appState.listScroll = window.scrollY; router.navigate('details', {id: ${t.Id}})" class="bg-white dark:bg-surface-dark p-4 rounded-xl cursor-pointer hover:shadow-md transition-shadow">
                             <div class="flex justify-between items-start">
                                 <div class="flex-1 min-w-0 mr-3">
                                     <p class="font-bold truncate">${t.Details || 'Transaction'}</p>
@@ -551,7 +574,7 @@
             },
 
             clearFilters() {
-                appState.filters = { status: '', accountName: '', accountType: '' };
+                appState.filters = { status: '', accountName: '', accountType: '', categoryId: '' };
                 router.navigate('list'); // Re-renders header with correct state
             },
 
@@ -601,25 +624,7 @@
                                 <div>
                                     <label class="text-xs text-text-secondary">Category</label>
                                     <select id="reviewCategory" class="w-full h-10 px-3 mt-1 rounded-lg border border-gray-300 dark:border-border-dark bg-white dark:bg-surface-dark text-sm">
-                                        <option>-</option>
-                                        <option>Cashback</option>
-                                        <option>Ciggerate</option>
-                                        <option>Clothes</option>
-                                        <option>Credit Bill</option>
-                                        <option>Credit card bill</option>
-                                        <option>Food</option>
-                                        <option>Grocery</option>
-                                        <option>Health & Meds</option>
-                                        <option>Home</option>
-                                        <option>Investment</option>
-                                        <option>Milk</option>
-                                        <option>Personal</option>
-                                        <option>Petrol</option>
-                                        <option>Refund</option>
-                                        <option>Salary</option>
-                                        <option>Self</option>
-                                        <option>Transport</option>
-                                        <option>Trip</option>
+                                        <option value="">- Select Category -</option>
                                     </select>
                                 </div>
                                 <div>
@@ -637,6 +642,17 @@
                     // Pre-fill form
                     const categorySelect = document.getElementById('reviewCategory');
                     const notesInput = document.getElementById('reviewNotes');
+
+                    // Load categories
+                    try {
+                        const categories = await api.getCategories();
+                        categories.forEach(c => {
+                            const opt = document.createElement('option');
+                            opt.value = c.name;
+                            opt.textContent = c.name;
+                            categorySelect.appendChild(opt);
+                        });
+                    } catch (e) { console.error('Failed to load categories', e); }
 
                     if (t.Category) categorySelect.value = t.Category;
                     if (t.Notes) notesInput.value = t.Notes;
@@ -706,25 +722,7 @@
                             <div>
                                 <label class="text-sm font-medium">Category</label>
                                 <select id="manualCategory" class="w-full h-12 px-4 mt-1 rounded-lg border border-gray-300 dark:border-border-dark bg-white dark:bg-surface-dark">
-                                    <option>-</option>
-                                    <option>Cashback</option>
-                                    <option>Ciggerate</option>
-                                    <option>Clothes</option>
-                                    <option>Credit Bill</option>
-                                    <option>Credit card bill</option>
-                                    <option>Food</option>
-                                    <option>Grocery</option>
-                                    <option>Health & Meds</option>
-                                    <option>Home</option>
-                                    <option>Investment</option>
-                                    <option>Milk</option>
-                                    <option>Personal</option>
-                                    <option>Petrol</option>
-                                    <option>Refund</option>
-                                    <option>Salary</option>
-                                    <option>Self</option>
-                                    <option>Transport</option>
-                                    <option>Trip</option>
+                                    <option value="">- Select Category -</option>
                                 </select>
                             </div>
                             <div>
@@ -752,7 +750,19 @@
                     </footer>
                 </div>`;
             },
-            initAddExpense() {
+            async initAddExpense() {
+                // Load categories
+                try {
+                    const catSelect = document.getElementById('manualCategory');
+                    const categories = await api.getCategories();
+                    categories.forEach(c => {
+                        const opt = document.createElement('option');
+                        opt.value = c.name;
+                        opt.textContent = c.name;
+                        catSelect.appendChild(opt);
+                    });
+                } catch (e) { console.error('Failed to load categories', e); }
+
                 document.getElementById('saveExpenseBtn').onclick = async () => {
                     const amount = parseFloat(document.getElementById('manualAmount').value) || 0;
                     const type = document.getElementById('manualType').value;
@@ -771,6 +781,120 @@
                         const result = await api.createTransaction(data);
                         if (result.success) { alert('Transaction saved!'); router.navigate('home'); }
                         else alert('Failed: ' + (result.detail || 'Unknown error'));
+                    } catch (e) { alert('Failed: ' + e.message); }
+                };
+            },
+
+            // Categories Screen
+            categories() {
+                return `
+                <div class="flex flex-col min-h-screen pb-16">
+                    <header class="flex items-center p-4 border-b border-gray-200 dark:border-border-dark">
+                        <h1 class="text-lg font-bold">Categories</h1>
+                    </header>
+                    <main id="categoriesList" class="flex-1 p-4 space-y-3 pb-20">
+                        <div class="flex justify-center py-8"><div class="size-8 border-2 border-primary/30 border-t-primary rounded-full animate-spin"></div></div>
+                    </main>
+                    
+                    <!-- FAB -->
+                    <button onclick="router.navigate('addCategory')" class="fixed bottom-20 right-4 w-14 h-14 bg-primary text-white rounded-full shadow-lg flex items-center justify-center hover:bg-primary/90 z-10">
+                        <span class="material-symbols-outlined text-3xl">add</span>
+                    </button>
+                    
+                    <!-- Bottom Navigation -->
+                    <nav class="fixed bottom-0 left-0 right-0 bg-surface-dark border-t border-border-dark">
+                        <div class="flex justify-around py-2">
+                            <button onclick="router.navigate('home')" class="flex flex-col items-center p-2 text-text-secondary hover:text-primary">
+                                <span class="material-symbols-outlined">home</span>
+                                <span class="text-xs mt-1">Home</span>
+                            </button>
+                            <button onclick="router.navigate('files')" class="flex flex-col items-center p-2 text-text-secondary hover:text-primary">
+                                <span class="material-symbols-outlined">folder</span>
+                                <span class="text-xs mt-1">Files</span>
+                            </button>
+                            <button onclick="router.navigate('accounts')" class="flex flex-col items-center p-2 text-text-secondary hover:text-primary">
+                                <span class="material-symbols-outlined">account_balance</span>
+                                <span class="text-xs mt-1">Accounts</span>
+                            </button>
+                            <button onclick="router.navigate('categories')" class="flex flex-col items-center p-2 text-primary">
+                                <span class="material-symbols-outlined">category</span>
+                                <span class="text-xs mt-1">Categories</span>
+                            </button>
+                            <button onclick="router.navigate('settings')" class="flex flex-col items-center p-2 text-text-secondary hover:text-primary">
+                                <span class="material-symbols-outlined">settings</span>
+                                <span class="text-xs mt-1">Settings</span>
+                            </button>
+                        </div>
+                    </nav>
+                </div>`;
+            },
+            async initCategories() {
+                const list = document.getElementById('categoriesList');
+                try {
+                    const categories = await api.getCategories();
+                    if (categories.length === 0) {
+                        list.innerHTML = '<p class="text-center text-text-secondary py-8">No categories found</p>';
+                        return;
+                    }
+                    list.innerHTML = categories.map(c => `
+                        <div class="bg-white dark:bg-surface-dark p-4 rounded-xl flex justify-between items-center">
+                            <div class="flex items-center gap-3">
+                                <div class="size-10 rounded-full flex items-center justify-center ${c.type === 'INCOME' ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'}">
+                                    <span class="material-symbols-outlined">${c.type === 'INCOME' ? 'trending_up' : 'trending_down'}</span>
+                                </div>
+                                <div>
+                                    <p class="font-bold">${c.name}</p>
+                                    <p class="text-xs text-text-secondary">${c.type}</p>
+                                </div>
+                            </div>
+                            <button onclick="if(confirm('Delete ${c.name}?')) api.deleteCategory('${c.id}').then(() => screens.initCategories())" class="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-full">
+                                <span class="material-symbols-outlined">delete</span>
+                            </button>
+                        </div>
+                    `).join('');
+                } catch (e) {
+                    list.innerHTML = '<p class="text-center text-red-500 py-8">Failed to load categories</p>';
+                }
+            },
+
+            // Add Category Screen
+            addCategory() {
+                return `
+                <div class="flex flex-col min-h-screen">
+                    <header class="flex items-center p-4 border-b border-gray-200 dark:border-border-dark">
+                        <button onclick="router.navigate('categories')" class="p-2 -ml-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700">
+                            <span class="material-symbols-outlined">arrow_back</span>
+                        </button>
+                        <h1 class="text-lg font-bold ml-2">Add Category</h1>
+                    </header>
+                    <main class="flex-1 p-4 space-y-4">
+                        <div>
+                            <label class="text-sm font-medium">Name</label>
+                            <input id="catName" type="text" placeholder="e.g. Groceries" class="w-full h-12 px-4 mt-1 rounded-lg border border-gray-300 dark:border-border-dark bg-white dark:bg-surface-dark" />
+                        </div>
+                        <div>
+                            <label class="text-sm font-medium">Type</label>
+                            <select id="catType" class="w-full h-12 px-4 mt-1 rounded-lg border border-gray-300 dark:border-border-dark bg-white dark:bg-surface-dark">
+                                <option value="EXPENSE">Expense</option>
+                                <option value="INCOME">Income</option>
+                            </select>
+                        </div>
+                    </main>
+                    <footer class="p-4 pb-8">
+                        <button id="saveCatBtn" class="w-full h-12 bg-primary text-white font-bold rounded-xl flex items-center justify-center gap-2">
+                            <span class="material-symbols-outlined">save</span> Save Category
+                        </button>
+                    </footer>
+                </div>`;
+            },
+            initAddCategory() {
+                document.getElementById('saveCatBtn').onclick = async () => {
+                    const name = document.getElementById('catName').value;
+                    const type = document.getElementById('catType').value;
+                    if (!name) { alert('Enter name'); return; }
+                    try {
+                        await api.createCategory({ name, type });
+                        router.navigate('categories');
                     } catch (e) { alert('Failed: ' + e.message); }
                 };
             },

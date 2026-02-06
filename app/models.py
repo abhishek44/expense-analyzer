@@ -3,7 +3,7 @@
 from datetime import datetime
 from enum import Enum
 
-from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean
+from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, ForeignKey
 from sqlalchemy.orm import declarative_base
 
 Base = declarative_base()
@@ -32,6 +32,7 @@ class Transaction(Base):
     review_datetime = Column(DateTime, nullable=True)
     uploaded_datetime = Column(DateTime, default=datetime.now)
     Category = Column(String(100), nullable=True)
+    category_id = Column(String(36), ForeignKey('categories.id'), nullable=True)
     Notes = Column(String(500), nullable=True)
     
     def __repr__(self):
@@ -52,7 +53,39 @@ class Transaction(Base):
             "review_datetime": self.review_datetime.isoformat() if self.review_datetime else None,
             "uploaded_datetime": self.uploaded_datetime.isoformat() if self.uploaded_datetime else None,
             "Category": self.Category,
+            "category_id": self.category_id,
             "Notes": self.Notes,
+        }
+
+
+class Category(Base):
+    """Transaction categories."""
+    
+    __tablename__ = "categories"
+    
+    id = Column(String(36), primary_key=True)
+    name = Column(String(100), nullable=False)
+    type = Column(String(20), nullable=False)  # INCOME, EXPENSE
+    parent_id = Column(String(36), ForeignKey('categories.id'), nullable=True)
+    description = Column(String(255), nullable=True)
+    icon_id = Column(String(50), nullable=True)
+    color_hex = Column(String(20), nullable=True)
+    is_archived = Column(Integer, default=0, nullable=False)
+    created_at = Column(DateTime, default=datetime.now, nullable=False)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, nullable=False)
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "name": self.name,
+            "type": self.type,
+            "parent_id": self.parent_id,
+            "description": self.description,
+            "icon_id": self.icon_id,
+            "color_hex": self.color_hex,
+            "is_archived": self.is_archived,
+            "created_at": self.created_at.isoformat(),
+            "updated_at": self.updated_at.isoformat(),
         }
 
 
@@ -66,6 +99,7 @@ class AccountType(str, Enum):
     INVESTMENT = "INVESTMENT"
 
 
+# Previous Account model code ...
 class Account(Base):
     """Financial accounts for tracking balances."""
     
@@ -98,7 +132,6 @@ class Account(Base):
 
 
 # Column mapping for CSV headers to model fields
-# Strict Column mapping for CSV headers to model fields
 TRANSACTION_COLUMN_MAPPING = {
     "Date": "Date",
     "Details": "Details",

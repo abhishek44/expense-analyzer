@@ -14,6 +14,7 @@ export interface Transaction {
     review_datetime: string | null;
     uploaded_datetime: string | null;
     Category: string | null;
+    category_id?: string | null;
     Notes: string | null;
 }
 
@@ -43,6 +44,17 @@ export interface Account {
     is_archived: number;       // 0 or 1
     created_at: string;        // ISO timestamp
     updated_at: string;        // ISO timestamp
+}
+
+export interface Category {
+    id: string;                // UUID
+    name: string;
+    type: 'INCOME' | 'EXPENSE';
+    icon?: string;
+    color?: string;
+    is_archived: number;
+    created_at: string;
+    updated_at: string;
 }
 
 export enum ReviewStatus {
@@ -141,6 +153,19 @@ class Database {
                 updated_at TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS categories (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                type TEXT NOT NULL CHECK (type IN ('INCOME', 'EXPENSE')),
+                icon TEXT,
+                color TEXT,
+                is_archived INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_categories_type ON categories(type);
+
             CREATE INDEX IF NOT EXISTS idx_accounts_type ON accounts(account_type);
         `;
 
@@ -165,6 +190,20 @@ class Database {
             // Ignore error if column already exists
             if (!error.message?.includes('duplicate column name')) {
                 console.log('Migration note: account_id column might already exist or failed to add:', error.message);
+            }
+            if (!error.message?.includes('duplicate column name')) {
+                console.log('Migration note: account_id column might already exist or failed to add:', error.message);
+            }
+        }
+
+        // Migration: Add category_id column to transactions if it doesn't exist
+        try {
+            await this.db.execAsync('ALTER TABLE transactions ADD COLUMN category_id TEXT');
+            console.log('Added category_id column');
+        } catch (error: any) {
+            // Ignore error if column already exists
+            if (!error.message?.includes('duplicate column name')) {
+                console.log('Migration note: category_id column might already exist or failed to add:', error.message);
             }
         }
 
@@ -263,6 +302,7 @@ class Database {
         filenameFilter?: string,
         accountName?: string,
         accountType?: string,
+        categoryId?: string,
         limit: number = 500
     ): Promise<Transaction[]> {
         await this.ensureInit();
@@ -289,6 +329,11 @@ class Database {
         if (accountType) {
             query += ' AND Account_type LIKE ?';
             params.push(`%${accountType}%`);
+        }
+
+        if (categoryId) {
+            query += ' AND category_id = ?';
+            params.push(categoryId);
         }
 
         query += ' ORDER BY Id DESC LIMIT ?';
@@ -723,8 +768,94 @@ class Database {
 
         return accountsWithBalances;
     }
+
+    // ==================== CATEGORY METHODS ====================
+
+    /**
+     * Create a new category
+     */
+    async createCategory(category: Omit<Category, 'id' | 'created_at' | 'updated_at' | 'is_archived'>): Promise<string> {
+        await this.ensureInit();
+        if (!this.db) throw new Error('Database not initialized');
+
+        const id = this.generateUUID();
+        const now = new Date().toISOString();
+
+        await this.db.runAsync(
+            `INSERT INTO categories (id, name, type, icon, color, is_archived, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+                id,
+                category.name,
+                category.type,
+                category.icon || null,
+                category.color || null,
+                0,
+                now,
+                now
+            ]
+        );
+
+        return id;
+    }
+
+    /**
+     * Get all categories
+     */
+    async getCategories(type?: 'INCOME' | 'EXPENSE'): Promise<Category[]> {
+        await this.ensureInit();
+        if (!this.db) throw new Error('Database not initialized');
+
+        let query = 'SELECT * FROM categories WHERE is_archived = 0';
+        const params: any[] = [];
+
+        if (type) {
+            query += ' AND type = ?';
+            params.push(type);
+        }
+
+        query += ' ORDER BY name ASC';
+
+        const result = await this.db.getAllAsync<Category>(query, params);
+        return result;
+    }
+
+    /**
+     * Delete a category
+     */
+    async deleteCategory(id: string): Promise<void> {
+        await this.ensureInit();
+        if (!this.db) throw new Error('Database not initialized');
+
+        await this.db.runAsync('DELETE FROM categories WHERE id = ?', [id]);
+    }
+
+    async updateCategory(id: string, updates: Partial<Category>): Promise<void> {
+        await this.ensureInit();
+        if (!this.db) throw new Error('Database not initialized');
+
+        const fields: string[] = [];
+        const values: any[] = [];
+
+        if (updates.name !== undefined) {
+            fields.push('name = ?');
+            values.push(updates.name);
+        }
+        if (updates.type !== undefined) {
+            fields.push('type = ?');
+            values.push(updates.type);
+        }
+
+        fields.push('updated_at = ?');
+        values.push(new Date().toISOString());
+
+        if (fields.length === 0) return;
+
+        values.push(id);
+        const query = `UPDATE categories SET ${fields.join(', ')} WHERE id = ?`;
+        await this.db.runAsync(query, values);
+    }
 }
 
 // Create singleton instance
 export const database = new Database();
-

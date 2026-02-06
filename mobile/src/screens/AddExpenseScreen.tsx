@@ -15,25 +15,42 @@ import { Picker } from '@react-native-picker/picker';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { colors, spacing, borderRadius } from '../theme/colors';
-import { api } from '../api/client';
+import { api, Category } from '../api/client';
 import { validateDate, sanitizeAmount } from '../utils/validation';
 
 type Props = {
     navigation: NativeStackNavigationProp<RootStackParamList, 'AddExpense'>;
 };
 
-const categories = ['-', 'Cashback', 'Ciggerate', 'Clothes', 'Credit Bill', 'Credit card bill', 'Food', 'Grocery', 'Health & Meds', 'Home', 'Investment', 'Milk', 'Personal', 'Petrol', 'Refund', 'Salary', 'Self', 'Transport', 'Trip'];
+
 const transactionTypes = ['Debit', 'Credit'];
 
 export default function AddExpenseScreen({ navigation }: Props) {
     const [transactionDate, setTransactionDate] = useState(new Date().toISOString().split('T')[0]);
     const [transactionType, setTransactionType] = useState('Debit');
     const [amount, setAmount] = useState('');
-    const [category, setCategory] = useState('Food');
+    const [categories, setCategories] = useState<Category[]>([]);
+    const [selectedCategoryId, setSelectedCategoryId] = useState<string>('');
     const [account, setAccount] = useState('');
     const [accountType, setAccountType] = useState('Savings');
     const [notes, setNotes] = useState('');
     const [submitting, setSubmitting] = useState(false);
+
+    React.useEffect(() => {
+        loadCategories();
+    }, []);
+
+    const loadCategories = async () => {
+        try {
+            const data = await api.getCategories();
+            setCategories(data);
+            if (data.length > 0) {
+                setSelectedCategoryId(data[0].id);
+            }
+        } catch (e) {
+            console.error('Failed to load categories', e);
+        }
+    };
 
     const handleSave = async () => {
         // Validate date
@@ -63,7 +80,8 @@ export default function AddExpenseScreen({ navigation }: Props) {
                 Credit: transactionType === 'Credit' ? parseFloat(sanitized) : undefined,
                 Account_name: account,
                 Account_type: accountType,
-                Category: category,
+                Category: categories.find(c => c.id === selectedCategoryId)?.name || 'Manual',
+                categoryId: selectedCategoryId,
                 Notes: notes || undefined,
             });
 
@@ -132,12 +150,12 @@ export default function AddExpenseScreen({ navigation }: Props) {
                         <Text style={styles.fieldLabel}>Category</Text>
                         <View style={styles.pickerContainer}>
                             <Picker
-                                selectedValue={category}
-                                onValueChange={(itemValue) => setCategory(itemValue)}
+                                selectedValue={selectedCategoryId}
+                                onValueChange={(itemValue) => setSelectedCategoryId(itemValue)}
                                 style={styles.picker}
                             >
                                 {categories.map((cat) => (
-                                    <Picker.Item key={cat} label={cat} value={cat} />
+                                    <Picker.Item key={cat.id} label={cat.name} value={cat.id} />
                                 ))}
                             </Picker>
                         </View>

@@ -99,13 +99,17 @@ def migrate_db():
             
             print("Migration completed: credit_card_statements -> transactions")
         
-        # Drop expenses table if it exists
-        result = conn.execute(text(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='expenses'"
-        ))
         if result.fetchone() is not None:
             print("Dropping expenses table...")
             conn.execute(text("DROP TABLE expenses"))
             print("Expenses table dropped")
         
+        # Check if transactions table needs category_id column
+        result = conn.execute(text("PRAGMA table_info(transactions)"))
+        columns = [row[1] for row in result.fetchall()]
+        if "category_id" not in columns:
+            print("Adding category_id column to transactions table...")
+            conn.execute(text("ALTER TABLE transactions ADD COLUMN category_id VARCHAR(36) REFERENCES categories(id)"))
+            print("Added category_id column")
+
         conn.commit()

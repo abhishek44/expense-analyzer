@@ -15,7 +15,17 @@ export interface Transaction {
     review_datetime: string | null;
     uploaded_datetime: string | null;
     Category: string | null;
+    category_id?: string | null;
     Notes: string | null;
+}
+
+export interface Category {
+    id: string;
+    name: string;
+    type: 'INCOME' | 'EXPENSE';
+    icon?: string;
+    color?: string;
+    is_archived: number;
 }
 
 export interface UploadedFile {
@@ -223,6 +233,7 @@ class ApiClient {
         filenameFilter?: string,
         accountName?: string,
         accountType?: string,
+        categoryId?: string,
         limit: number = 500
     ): Promise<{ data: Transaction[]; total: number }> {
         await this.ensureInit();
@@ -232,6 +243,7 @@ class ApiClient {
             filenameFilter,
             accountName,
             accountType,
+            categoryId,
             limit
         );
 
@@ -262,18 +274,31 @@ class ApiClient {
     }
 
     /**
-     * Review transaction
+     * Review a transaction
      */
     async reviewTransaction(
         id: number,
         reviewData: {
             Category: string;
+            categoryId?: string;
             Notes?: string;
         }
     ): Promise<{ success: boolean; transaction?: Transaction }> {
         await this.ensureInit();
 
+        // If we have a category ID, use it. If not, maybe look it up by name?
+        // For now, we update both if provided. The underlying DB method needs to support categoryId updates.
+        // I need to update database.reviewTransaction to support category_id.
+        // Wait, I didn't update database.reviewTransaction signature in previous step!
+        // I only added createCategory etc.
+        // Let me update database.reviewTransaction first or do a raw update here?
+        // Better to use database.updateTransaction.
+
         await database.reviewTransaction(id, reviewData.Category, reviewData.Notes);
+
+        if (reviewData.categoryId) {
+            await database.updateTransaction(id, { category_id: reviewData.categoryId });
+        }
 
         const transaction = await database.getTransaction(id);
 
@@ -294,6 +319,7 @@ class ApiClient {
         Account_name: string;
         Account_type?: string;
         Category?: string;
+        categoryId?: string;
         Notes?: string;
     }): Promise<{ success: boolean; transaction?: Transaction }> {
         await this.ensureInit();
@@ -307,6 +333,7 @@ class ApiClient {
             Account_type: data.Account_type || 'Manual',
             filename: 'manual_entry',
             Category: data.Category || null,
+            category_id: data.categoryId || null,
             Notes: data.Notes || null,
             review_status: data.Category ? ReviewStatus.REVIEWED : ReviewStatus.PENDING,
             review_datetime: data.Category ? new Date().toISOString() : null,
@@ -348,6 +375,58 @@ class ApiClient {
     async exportTransactions(): Promise<Transaction[]> {
         await this.ensureInit();
         return (await database.exportAllTransactions()) as Transaction[];
+    }
+
+
+    // ==================== CATEGORY METHODS ====================
+
+    /**
+     * Get all categories
+     */
+    async getCategories(type?: 'INCOME' | 'EXPENSE'): Promise<Category[]> {
+        await this.ensureInit();
+        return await database.getCategories(type);
+    }
+
+    /**
+     * Create a new category
+     */
+    async createCategory(data: { name: string; type: 'INCOME' | 'EXPENSE' }): Promise<{ success: boolean; id?: string; error?: string }> {
+        try {
+            await this.ensureInit();
+            const id = await database.createCategory({
+                name: data.name,
+                type: data.type,
+                color: '#137fec', // Default blue
+                icon: 'category'
+            });
+            return { success: true, id };
+        } catch (e: any) {
+            return { success: false, error: e.message };
+        }
+    }
+
+    async updateCategory(
+        id: string,
+        category: { name?: string; type?: 'INCOME' | 'EXPENSE' }
+    ): Promise<{ success: boolean; error?: string }> {
+        await this.ensureInit();
+        try {
+            await database.updateCategory(id, category);
+            return { success: true };
+        } catch (e: any) {
+            console.error('Failed to update category', e);
+            return { success: false, error: e.message };
+        }
+    }
+
+    /**
+     * Delete a category
+     */
+    async deleteCategory(id: string): Promise<{ success: boolean; message?: string }> {
+        await this.ensureInit();
+        await database.deleteCategory(id);
+        return { success: true };
     }
 }
 
