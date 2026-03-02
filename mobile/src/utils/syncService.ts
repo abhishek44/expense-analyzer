@@ -1,8 +1,17 @@
-import { database, Transaction } from '../database/database';
+import { database, Transaction, Category, Account } from '../database/database';
 import { storage } from '../api/storage';
 import base64 from 'react-native-base64';
 
 export interface SyncResult {
+    success: boolean;
+    transactions: { uploaded: number; downloaded: number };
+    categories: { uploaded: number; downloaded: number };
+    accounts: { uploaded: number; downloaded: number };
+    errors: string[];
+}
+
+// Legacy interface for backward compatibility
+export interface LegacySyncResult {
     success: boolean;
     uploaded: number;
     downloaded: number;
@@ -11,10 +20,13 @@ export interface SyncResult {
 
 /**
  * Sync service for bidirectional sync with FastAPI backend
+ * Syncs: Categories, Accounts, Transactions (in that order due to dependencies)
  */
 class SyncService {
     private baseUrl: string = '';
     private lastSyncedIds: Set<number> = new Set();
+    private lastSyncedCategoryIds: Set<string> = new Set();
+    private lastSyncedAccountIds: Set<string> = new Set();
 
     /**
      * Initialize sync service with backend URL
@@ -25,21 +37,31 @@ class SyncService {
     }
 
     /**
-     * Load previously synced transaction IDs from database
+     * Load previously synced IDs from database
      */
     private async loadSyncedIds(): Promise<void> {
         try {
+            // Load transaction synced IDs
             const syncedIds = await database.getSyncedTransactionIds();
             this.lastSyncedIds = new Set(syncedIds);
             console.log(`Loaded ${this.lastSyncedIds.size} synced transaction IDs from DB`);
+
+            // Load category synced IDs
+            const syncedCategoryIds = await database.getSyncedCategoryIds();
+            this.lastSyncedCategoryIds = new Set(syncedCategoryIds);
+            console.log(`Loaded ${this.lastSyncedCategoryIds.size} synced category IDs from DB`);
+
+            // Load account synced IDs
+            const syncedAccountIds = await database.getSyncedAccountIds();
+            this.lastSyncedAccountIds = new Set(syncedAccountIds);
+            console.log(`Loaded ${this.lastSyncedAccountIds.size} synced account IDs from DB`);
         } catch (error) {
             console.error('Failed to load synced IDs:', error);
-            // Fallback to empty, will be re-populated on next successful sync logic or full re-sync
             this.lastSyncedIds = new Set();
+            this.lastSyncedCategoryIds = new Set();
+            this.lastSyncedAccountIds = new Set();
         }
     }
-
-
 
     /**
      * Update backend URL
@@ -63,22 +85,209 @@ class SyncService {
         }
     }
 
+    // ==================== CATEGORY SYNC ====================
+
     /**
-     * Upload local transactions to backend (only new ones)
+     * Upload local categories to backend
      */
-    private async uploadToBackend(): Promise<{ count: number; errors: string[] }> {
+    private async uploadCategoriesToBackend(): Promise<{ count: number; errors: string[] }> {
         const errors: string[] = [];
         let uploadedCount = 0;
 
         try {
-            // Get all local transactions
+            const localCategories = await database.exportAllCategories();
+
+            if (localCategories.length === 0) {
+                return { count: 0, errors: [] };
+            }
+
+            // Filter out categories that have already been synced
+            const newCategories = localCategories.filter(
+                c => !this.lastSyncedCategoryIds.has(c.id)
+            );
+
+            if (newCategories.length === 0) {
+                console.log('No new categories to upload');
+                return { count: 0, errors: [] };
+            }
+
+            console.log(`Uploading ${newCategories.length} categories...`);
+
+            const response = await fetch(`${this.baseUrl}/api/categories/batch`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(newCategories),
+            });
+
+            if (response.ok) {
+                uploadedCount = newCategories.length;
+                const syncedIds = newCategories.map(c => c.id);
+                await database.markCategoriesAsSynced(syncedIds);
+                syncedIds.forEach(id => this.lastSyncedCategoryIds.add(id));
+            } else {
+                const errorText = await response.text().catch(() => 'Unknown error');
+                errors.push(`Failed to upload categories: ${errorText}`);
+            }
+        } catch (error: any) {
+            errors.push(`Category upload error: ${error.message}`);
+        }
+
+        return { count: uploadedCount, errors };
+    }
+
+    /**
+     * Download categories from backend
+     */
+    private async downloadCategoriesFromBackend(): Promise<{ count: number; errors: string[] }> {
+        const errors: string[] = [];
+        let downloadedCount = 0;
+
+        try {
+            const response = await fetch(`${this.baseUrl}/api/categories?include_archived=true`, {
+                method: 'GET',
+                headers: { 'Content-Type': 'application/json' },
+            });
+
+            if (!response.ok) {
+                throw new Error('Failed to fetch categories from backend');
+            }
+
+            const backendCategories: Category[] = await response.json();
+
+            if (backendCategories.length === 0) {
+                return { count: 0, errors: [] };
+            }
+
+            console.log(`Received ${backendCategories.length} categories from backend`);
+
+            // Upsert each category (handles insert or update based on updated_at)
+            for (const cat of backendCategories) {
+                await database.upsertCategory(cat);
+                downloadedCount++;
+            }
+
+            // Mark all as synced
+            const syncedIds = backendCategories.map(c => c.id);
+            await database.markCategoriesAsSynced(syncedIds);
+            syncedIds.forEach(id => this.lastSyncedCategoryIds.add(id));
+
+        } catch (error: any) {
+            errors.push(`Category download error: ${error.message}`);
+        }
+
+        return { count: downloadedCount, errors };
+    }
+
+    // ==================== ACCOUNT SYNC ====================
+
+    /**
+     * Upload local accounts to backend
+     */
+    private async uploadAccountsToBackend(): Promise<{ count: number; errors: string[] }> {
+        const errors: string[] = [];
+        let uploadedCount = 0;
+
+        try {
+            const localAccounts = await database.exportAllAccounts();
+
+            if (localAccounts.length === 0) {
+                return { count: 0, errors: [] };
+            }
+
+            // Filter out accounts that have already been synced
+            const newAccounts = localAccounts.filter(
+                a => !this.lastSyncedAccountIds.has(a.id)
+            );
+
+            if (newAccounts.length === 0) {
+                console.log('No new accounts to upload');
+                return { count: 0, errors: [] };
+            }
+
+            console.log(`Uploading ${newAccounts.length} accounts...`);
+
+            const response = await fetch(`${this.baseUrl}/api/accounts/batch`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(newAccounts),
+            });
+
+            if (response.ok) {
+                uploadedCount = newAccounts.length;
+                const syncedIds = newAccounts.map(a => a.id);
+                await database.markAccountsAsSynced(syncedIds);
+                syncedIds.forEach(id => this.lastSyncedAccountIds.add(id));
+            } else {
+                const errorText = await response.text().catch(() => 'Unknown error');
+                errors.push(`Failed to upload accounts: ${errorText}`);
+            }
+        } catch (error: any) {
+            errors.push(`Account upload error: ${error.message}`);
+        }
+
+        return { count: uploadedCount, errors };
+    }
+
+    /**
+     * Download accounts from backend
+     */
+    private async downloadAccountsFromBackend(): Promise<{ count: number; errors: string[] }> {
+        const errors: string[] = [];
+        let downloadedCount = 0;
+
+        try {
+            const response = await fetch(`${this.baseUrl}/api/accounts?include_archived=true`, {
+                method: 'GET',
+                headers: { 'Content-Type': 'application/json' },
+            });
+
+            if (!response.ok) {
+                throw new Error('Failed to fetch accounts from backend');
+            }
+
+            const result = await response.json();
+            const backendAccounts: Account[] = result.accounts || [];
+
+            if (backendAccounts.length === 0) {
+                return { count: 0, errors: [] };
+            }
+
+            console.log(`Received ${backendAccounts.length} accounts from backend`);
+
+            // Upsert each account (handles insert or update based on updated_at)
+            for (const acc of backendAccounts) {
+                await database.upsertAccount(acc);
+                downloadedCount++;
+            }
+
+            // Mark all as synced
+            const syncedIds = backendAccounts.map(a => a.id);
+            await database.markAccountsAsSynced(syncedIds);
+            syncedIds.forEach(id => this.lastSyncedAccountIds.add(id));
+
+        } catch (error: any) {
+            errors.push(`Account download error: ${error.message}`);
+        }
+
+        return { count: downloadedCount, errors };
+    }
+
+    // ==================== TRANSACTION SYNC ====================
+
+    /**
+     * Upload local transactions to backend (only new ones)
+     */
+    private async uploadTransactionsToBackend(): Promise<{ count: number; errors: string[] }> {
+        const errors: string[] = [];
+        let uploadedCount = 0;
+
+        try {
             const localTransactions = await database.exportAllTransactions();
 
             if (localTransactions.length === 0) {
                 return { count: 0, errors: [] };
             }
 
-            // Filter out transactions that have already been synced
             const newTransactions = localTransactions.filter(
                 t => t.Id && !this.lastSyncedIds.has(t.Id)
             );
@@ -90,7 +299,6 @@ class SyncService {
 
             console.log(`Uploading ${newTransactions.length} new transactions...`);
 
-            // Group by filename for batch upload
             const fileGroups = new Map<string, Transaction[]>();
             newTransactions.forEach(t => {
                 const filename = t.filename || 'manual_entry.csv';
@@ -100,16 +308,10 @@ class SyncService {
                 fileGroups.get(filename)!.push(t);
             });
 
-            // Upload each group
             for (const [filename, transactions] of fileGroups) {
                 try {
-                    // Create CSV content
                     const csvContent = this.transactionsToCSV(transactions);
-
-                    // Use React Native compatible FormData
                     const formData = new FormData();
-
-                    // Create file object for React Native
                     const base64Content = base64.encode(csvContent);
                     const fileObject: any = {
                         uri: `data:text/csv;base64,${base64Content}`,
@@ -129,7 +331,6 @@ class SyncService {
 
                     if (response.ok) {
                         uploadedCount += transactions.length;
-                        // Mark these transactions as synced in DB and memory
                         const syncedIds: number[] = [];
                         transactions.forEach(t => {
                             if (t.Id) {
@@ -138,7 +339,6 @@ class SyncService {
                             }
                         });
 
-                        // Persist to DB
                         if (syncedIds.length > 0) {
                             await database.markTransactionsAsSynced(syncedIds);
                         }
@@ -150,8 +350,6 @@ class SyncService {
                     errors.push(`Error uploading ${filename}: ${error.message}`);
                 }
             }
-
-
         } catch (error: any) {
             errors.push(`Upload error: ${error.message}`);
         }
@@ -162,12 +360,11 @@ class SyncService {
     /**
      * Download transactions from backend
      */
-    private async downloadFromBackend(): Promise<{ count: number; errors: string[] }> {
+    private async downloadTransactionsFromBackend(): Promise<{ count: number; errors: string[] }> {
         const errors: string[] = [];
         let downloadedCount = 0;
 
         try {
-            // Fetch all transactions from backend
             const response = await fetch(`${this.baseUrl}/api/transactions?limit=10000`, {
                 method: 'GET',
                 headers: { 'Content-Type': 'application/json' },
@@ -184,23 +381,19 @@ class SyncService {
                 return { count: 0, errors: [] };
             }
 
-            // Get all local transaction IDs to avoid duplicates
             const localTransactions = await database.exportAllTransactions();
 
-            // Create a set of local transaction signatures for duplicate detection
             const localSignatures = new Set(
                 localTransactions.map(t =>
                     `${t.Date}|${t.Details}|${t.Debit}|${t.Credit}|${t.Account_name}`
                 )
             );
 
-            // Insert transactions that don't exist locally
             const transactionsToInsert: Transaction[] = [];
             for (const t of backendTransactions) {
                 const signature = `${t.Date}|${t.Details}|${t.Debit}|${t.Credit}|${t.Account_name}`;
 
                 if (!localSignatures.has(signature)) {
-                    // Remove Id to let local DB auto-generate
                     const { Id, ...transactionWithoutId } = t;
                     transactionsToInsert.push(transactionWithoutId as Transaction);
                 }
@@ -208,14 +401,11 @@ class SyncService {
 
             if (transactionsToInsert.length > 0) {
                 console.log(`Downloading ${transactionsToInsert.length} new transactions...`);
-                // Insert and get IDs of new transactions
                 const insertedIds = await database.insertTransactions(transactionsToInsert);
                 downloadedCount = insertedIds.length;
 
-                // Mark these newly downloaded transactions as synced (so we don't re-upload them)
                 if (insertedIds.length > 0) {
                     await database.markTransactionsAsSynced(insertedIds);
-                    // Also update in-memory cache
                     insertedIds.forEach(id => this.lastSyncedIds.add(id));
                 }
             } else {
@@ -228,40 +418,60 @@ class SyncService {
         return { count: downloadedCount, errors };
     }
 
+    // ==================== MAIN SYNC ====================
+
     /**
-     * Perform full bidirectional sync
+     * Perform full bidirectional sync of all tables
+     * Order: Categories -> Accounts -> Transactions (due to dependencies)
      */
     async sync(): Promise<SyncResult> {
         const errors: string[] = [];
+        const result: SyncResult = {
+            success: false,
+            transactions: { uploaded: 0, downloaded: 0 },
+            categories: { uploaded: 0, downloaded: 0 },
+            accounts: { uploaded: 0, downloaded: 0 },
+            errors: [],
+        };
 
-        // Ensure we have loaded synced IDs
         await this.loadSyncedIds();
 
-        // Check connection first
         const isConnected = await this.checkConnection();
         if (!isConnected) {
-            return {
-                success: false,
-                uploaded: 0,
-                downloaded: 0,
-                errors: ['Cannot connect to backend. Check URL and network connection.'],
-            };
+            result.errors = ['Cannot connect to backend. Check URL and network connection.'];
+            return result;
         }
 
-        // Upload local transactions to backend (only new ones)
-        const uploadResult = await this.uploadToBackend();
-        errors.push(...uploadResult.errors);
+        // 1. Sync Categories first (transactions may reference them)
+        console.log('=== Syncing Categories ===');
+        const catDownload = await this.downloadCategoriesFromBackend();
+        const catUpload = await this.uploadCategoriesToBackend();
+        result.categories = { uploaded: catUpload.count, downloaded: catDownload.count };
+        errors.push(...catDownload.errors, ...catUpload.errors);
 
-        // Download backend transactions to local
-        const downloadResult = await this.downloadFromBackend();
-        errors.push(...downloadResult.errors);
+        // 2. Sync Accounts
+        console.log('=== Syncing Accounts ===');
+        const accDownload = await this.downloadAccountsFromBackend();
+        const accUpload = await this.uploadAccountsToBackend();
+        result.accounts = { uploaded: accUpload.count, downloaded: accDownload.count };
+        errors.push(...accDownload.errors, ...accUpload.errors);
 
-        return {
-            success: errors.length === 0,
-            uploaded: uploadResult.count,
-            downloaded: downloadResult.count,
-            errors,
-        };
+        // 3. Sync Transactions
+        console.log('=== Syncing Transactions ===');
+        const txUpload = await this.uploadTransactionsToBackend();
+        const txDownload = await this.downloadTransactionsFromBackend();
+        result.transactions = { uploaded: txUpload.count, downloaded: txDownload.count };
+        errors.push(...txUpload.errors, ...txDownload.errors);
+
+        result.success = errors.length === 0;
+        result.errors = errors;
+
+        console.log('=== Sync Complete ===');
+        console.log(`Categories: ${result.categories.downloaded} down, ${result.categories.uploaded} up`);
+        console.log(`Accounts: ${result.accounts.downloaded} down, ${result.accounts.uploaded} up`);
+        console.log(`Transactions: ${result.transactions.downloaded} down, ${result.transactions.uploaded} up`);
+
+        return result;
     }
 
     /**
@@ -269,6 +479,8 @@ class SyncService {
      */
     async resetSyncState(): Promise<void> {
         this.lastSyncedIds.clear();
+        this.lastSyncedCategoryIds.clear();
+        this.lastSyncedAccountIds.clear();
         console.warn('resetSyncState called but DB sync state is persistent. Use specialized method to clear DB if needed.');
     }
 

@@ -3,6 +3,7 @@
 import uuid
 from typing import List, Optional
 from datetime import datetime
+from dateutil import parser as date_parser
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
@@ -35,6 +36,20 @@ class CategoryUpdate(BaseModel):
     is_archived: Optional[bool] = None
 
 
+class CategoryBatchUpsert(BaseModel):
+    """Model for batch upserting categories from mobile sync."""
+    id: str  # UUID from mobile
+    name: str
+    type: str  # INCOME, EXPENSE
+    parent_id: Optional[str] = None
+    description: Optional[str] = None
+    icon_id: Optional[str] = None
+    color_hex: Optional[str] = None
+    is_archived: Optional[int] = 0
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
 class CategoryResponse(BaseModel):
     id: str
     name: str
@@ -52,9 +67,10 @@ class CategoryResponse(BaseModel):
 async def get_categories(
     type: Optional[str] = None, 
     include_archived: bool = False,
+    since: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
-    """List all categories."""
+    """List all categories. Use 'since' parameter for incremental sync."""
     query = db.query(Category)
     
     if type:
@@ -62,6 +78,14 @@ async def get_categories(
     
     if not include_archived:
         query = query.filter(Category.is_archived == 0)
+    
+    # Filter by updated_at for incremental sync
+    if since:
+        try:
+            since_dt = date_parser.parse(since)
+            query = query.filter(Category.updated_at >= since_dt)
+        except (ValueError, TypeError):
+            pass  # Ignore invalid date format
         
     categories = query.order_by(Category.name).all()
     return [c.to_dict() for c in categories]
@@ -98,6 +122,62 @@ async def create_category(data: CategoryCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(category)
     return category.to_dict()
+
+
+@router.post("/batch", response_model=List[CategoryResponse])
+async def upsert_categories(
+    categories: List[CategoryBatchUpsert],
+    db: Session = Depends(get_db)
+):
+    """Batch upsert categories for sync. Updates existing or inserts new."""
+    results = []
+    
+    for cat_data in categories:
+        existing = db.query(Category).filter(Category.id == cat_data.id).first()
+        
+        if existing:
+            # Update if mobile version is newer
+            mobile_updated = None
+            if cat_data.updated_at:
+                try:
+                    mobile_updated = date_parser.parse(cat_data.updated_at)
+                except (ValueError, TypeError):
+                    mobile_updated = None
+            
+            # Update if mobile has newer timestamp or no timestamp comparison possible
+            if mobile_updated is None or existing.updated_at is None or mobile_updated > existing.updated_at:
+                existing.name = cat_data.name
+                existing.type = cat_data.type
+                existing.parent_id = cat_data.parent_id
+                existing.description = cat_data.description
+                existing.icon_id = cat_data.icon_id
+                existing.color_hex = cat_data.color_hex
+                existing.is_archived = cat_data.is_archived or 0
+                existing.updated_at = datetime.now()
+            results.append(existing)
+        else:
+            # Insert new
+            now = datetime.now()
+            category = Category(
+                id=cat_data.id,
+                name=cat_data.name,
+                type=cat_data.type,
+                parent_id=cat_data.parent_id,
+                description=cat_data.description,
+                icon_id=cat_data.icon_id,
+                color_hex=cat_data.color_hex,
+                is_archived=cat_data.is_archived or 0,
+                created_at=now,
+                updated_at=now
+            )
+            db.add(category)
+            results.append(category)
+    
+    db.commit()
+    for cat in results:
+        db.refresh(cat)
+    
+    return [c.to_dict() for c in results]
 
 
 @router.patch("/{category_id}", response_model=CategoryResponse)

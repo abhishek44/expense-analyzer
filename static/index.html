@@ -10,6 +10,9 @@
     <link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect" />
     <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap"
         rel="stylesheet" />
+    <!-- Flatpickr date picker -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/themes/dark.css">
     <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap"
         rel="stylesheet" />
 
@@ -49,7 +52,99 @@
             -ms-overflow-style: none;
             scrollbar-width: none;
         }
+
+        /* Filter popover */
+        .filter-popover {
+            display: none;
+            animation: slideDown 0.2s ease-out;
+        }
+
+        .filter-popover.open {
+            display: block;
+        }
+
+        @keyframes slideDown {
+            from {
+                opacity: 0;
+                transform: translateY(-8px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .filter-backdrop {
+            display: none;
+            position: fixed;
+            inset: 0;
+            z-index: 14;
+        }
+
+        .filter-backdrop.open {
+            display: block;
+        }
+
+        /* Flatpickr dark theme overrides */
+        .flatpickr-calendar {
+            z-index: 9999 !important;
+        }
+        .flatpickr-calendar.dark {
+            background: #1e293b;
+            border-color: #334155;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4);
+            border-radius: 12px;
+        }
+
+        .flatpickr-calendar.dark .flatpickr-months .flatpickr-month,
+        .flatpickr-calendar.dark .flatpickr-weekdays,
+        .flatpickr-calendar.dark .flatpickr-weekday {
+            background: #1e293b;
+            color: #9dabb9;
+        }
+
+        .flatpickr-calendar.dark .flatpickr-day {
+            color: #e2e8f0;
+            border-radius: 8px;
+        }
+
+        .flatpickr-calendar.dark .flatpickr-day:hover {
+            background: #334155;
+            border-color: #334155;
+        }
+
+        .flatpickr-calendar.dark .flatpickr-day.selected {
+            background: #6c63ff;
+            border-color: #6c63ff;
+            color: #fff;
+        }
+
+        .flatpickr-calendar.dark .flatpickr-day.today {
+            border-color: #6c63ff;
+        }
+
+        .flatpickr-calendar.dark .flatpickr-months .flatpickr-prev-month,
+        .flatpickr-calendar.dark .flatpickr-months .flatpickr-next-month {
+            fill: #9dabb9;
+        }
+
+        .flatpickr-calendar.dark .flatpickr-months .flatpickr-prev-month:hover svg,
+        .flatpickr-calendar.dark .flatpickr-months .flatpickr-next-month:hover svg {
+            fill: #6c63ff;
+        }
+
+        .flatpickr-calendar.dark .flatpickr-current-month .flatpickr-monthDropdown-months,
+        .flatpickr-calendar.dark .flatpickr-current-month input.cur-year {
+            color: #e2e8f0;
+            font-weight: 600;
+        }
+
+        .flatpickr-calendar.dark .flatpickr-day.flatpickr-disabled {
+            color: #475569;
+        }
     </style>
+    <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
 </head>
 
 <body class="bg-background-light dark:bg-background-dark text-gray-900 dark:text-white font-display">
@@ -60,14 +155,21 @@
 
         // State
         let selectedFile = null;
+        const PAGE_SIZE = 100;
         const appState = {
             filters: {
                 status: '',
                 accountName: '',
                 accountType: '',
-                categoryId: ''
+                categoryId: '',
+                dateFrom: '',
+                dateTo: ''
             },
-            currentRequestToken: 0
+            currentRequestToken: 0,
+            // Pagination state
+            loadedTransactions: [],
+            totalTransactions: 0,
+            currentSkip: 0
         };
 
         const api = {
@@ -78,13 +180,15 @@
                 const res = await fetch(`${API_BASE}/upload-csv`, { method: 'POST', body: formData });
                 return res.json();
             },
-            async getTransactions(status = null, filename = null, accountName = null, accountType = null, categoryId = null) {
-                let url = `${API_BASE}/transactions?limit=500`;
+            async getTransactions(status = null, filename = null, accountName = null, accountType = null, categoryId = null, skip = 0, limit = PAGE_SIZE, dateFrom = null, dateTo = null) {
+                let url = `${API_BASE}/transactions?skip=${skip}&limit=${limit}`;
                 if (status) url += `&status_filter=${status}`;
                 if (filename) url += `&filename_filter=${encodeURIComponent(filename)}`;
                 if (accountName) url += `&account_name=${encodeURIComponent(accountName)}`;
                 if (accountType) url += `&account_type=${encodeURIComponent(accountType)}`;
                 if (categoryId) url += `&category_id=${encodeURIComponent(categoryId)}`;
+                if (dateFrom) url += `&date_from=${encodeURIComponent(dateFrom)}`;
+                if (dateTo) url += `&date_to=${encodeURIComponent(dateTo)}`;
                 const res = await fetch(url);
                 return res.json();
             },
@@ -409,7 +513,7 @@
                 const { status, accountName, accountType } = appState.filters;
                 return `
                 <div class="flex flex-col min-h-screen pb-16">
-                    <header class="sticky top-0 z-10 bg-background-light dark:bg-background-dark border-b border-gray-200 dark:border-border-dark">
+                    <header class="sticky top-0 z-10 bg-background-light dark:bg-background-dark border-b border-gray-200 dark:border-border-dark relative">
                         <div class="flex items-center p-4">
                             <button onclick="router.navigate('files')" class="p-2 -ml-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700">
                                 <span class="material-symbols-outlined">arrow_back</span>
@@ -418,21 +522,62 @@
                                 <h1 class="text-lg font-bold truncate">${selectedFile || 'All Transactions'}</h1>
                             </div>
                         </div>
-                        <div class="flex gap-2 px-4 pb-3 overflow-x-auto no-scrollbar">
+                        <div class="flex gap-2 px-4 pb-3 overflow-x-auto no-scrollbar items-center">
                             <button data-filter="" class="filter-chip ${status === '' ? 'active bg-primary text-white' : 'bg-white dark:bg-surface-dark border border-gray-200 dark:border-gray-700'} shrink-0 h-8 px-4 rounded-full text-sm font-bold">All</button>
                             <button data-filter="pending" class="filter-chip ${status === 'pending' ? 'active bg-primary text-white' : 'bg-white dark:bg-surface-dark border border-gray-200 dark:border-gray-700'} shrink-0 h-8 px-4 rounded-full text-sm">Pending</button>
                             <button data-filter="reviewed" class="filter-chip ${status === 'reviewed' ? 'active bg-primary text-white' : 'bg-white dark:bg-surface-dark border border-gray-200 dark:border-gray-700'} shrink-0 h-8 px-4 rounded-full text-sm">Reviewed</button>
+                            <div class="ml-auto shrink-0">
+                                <button id="filterBarToggle" class="flex items-center gap-1.5 h-8 px-3 rounded-full text-sm border transition-colors ${(accountName || accountType || appState.filters.categoryId || appState.filters.dateFrom || appState.filters.dateTo) ? 'bg-primary/10 border-primary text-primary' : 'bg-white dark:bg-surface-dark border-gray-200 dark:border-gray-700 text-text-secondary hover:border-primary hover:text-primary'}">
+                                    <span class="material-symbols-outlined text-lg">tune</span>
+                                    <span>Filters</span>
+                                    ${(accountName || accountType || appState.filters.categoryId || appState.filters.dateFrom || appState.filters.dateTo) ? '<span class="w-5 h-5 rounded-full bg-primary text-white text-xs flex items-center justify-center font-bold">' + [accountName, accountType, appState.filters.categoryId, appState.filters.dateFrom, appState.filters.dateTo].filter(Boolean).length + '</span>' : ''}
+                                </button>
+                            </div>
                         </div>
-                        <div class="px-4 pb-4 flex gap-2">
-                           <select id="filterAccountName" class="flex-1 h-9 px-3 rounded-lg border border-gray-200 dark:border-border-dark bg-white dark:bg-surface-dark text-sm">
-                               <option value="">All Accounts</option>
-                           </select>
-                           <select id="filterAccountType" class="flex-1 h-9 px-3 rounded-lg border border-gray-200 dark:border-border-dark bg-white dark:bg-surface-dark text-sm">
-                               <option value="">All Types</option>
-                           </select>
-                           <select id="filterCategory" class="flex-1 h-9 px-3 rounded-lg border border-gray-200 dark:border-border-dark bg-white dark:bg-surface-dark text-sm">
-                               <option value="">All Categories</option>
-                           </select>
+
+                        <!-- Active filter tags -->
+                        <div id="activeFilterTags" class="px-4 pb-3 flex flex-wrap gap-2 ${(accountName || accountType || appState.filters.categoryId || appState.filters.dateFrom || appState.filters.dateTo) ? '' : 'hidden'}">
+                        </div>
+
+                        <!-- Filter popover backdrop -->
+                        <div id="filterBackdrop" class="filter-backdrop"></div>
+
+                        <!-- Filter popover panel -->
+                        <div id="filterPopover" class="filter-popover absolute left-0 right-0 z-15 mx-4 mt-1 p-4 rounded-xl bg-white dark:bg-surface-dark border border-gray-200 dark:border-border-dark shadow-xl" style="z-index: 15;">
+                            <div class="space-y-3">
+                                <div>
+                                    <label class="text-xs font-semibold text-text-secondary uppercase tracking-wider">Account</label>
+                                    <select id="filterAccountName" class="mt-1 w-full h-10 px-3 rounded-lg border border-gray-200 dark:border-border-dark bg-background-light dark:bg-background-dark text-sm focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-colors">
+                                        <option value="">All Accounts</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label class="text-xs font-semibold text-text-secondary uppercase tracking-wider">Type</label>
+                                    <select id="filterAccountType" class="mt-1 w-full h-10 px-3 rounded-lg border border-gray-200 dark:border-border-dark bg-background-light dark:bg-background-dark text-sm focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-colors">
+                                        <option value="">All Types</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label class="text-xs font-semibold text-text-secondary uppercase tracking-wider">Category</label>
+                                    <select id="filterCategory" class="mt-1 w-full h-10 px-3 rounded-lg border border-gray-200 dark:border-border-dark bg-background-light dark:bg-background-dark text-sm focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-colors">
+                                        <option value="">All Categories</option>
+                                    </select>
+                                </div>
+                                <div class="flex gap-2">
+                                    <div class="flex-1">
+                                        <label class="text-xs font-semibold text-text-secondary uppercase tracking-wider">From Date</label>
+                                        <input type="text" id="filterDateFrom" value="${appState.filters.dateFrom}" placeholder="Select date" readonly class="mt-1 w-full h-10 px-3 rounded-lg border border-gray-200 dark:border-border-dark bg-background-light dark:bg-background-dark text-sm focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-colors cursor-pointer" />
+                                    </div>
+                                    <div class="flex-1">
+                                        <label class="text-xs font-semibold text-text-secondary uppercase tracking-wider">To Date</label>
+                                        <input type="text" id="filterDateTo" value="${appState.filters.dateTo}" placeholder="Select date" readonly class="mt-1 w-full h-10 px-3 rounded-lg border border-gray-200 dark:border-border-dark bg-background-light dark:bg-background-dark text-sm focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-colors cursor-pointer" />
+                                    </div>
+                                </div>
+                                <div class="flex gap-2 pt-1">
+                                    <button id="filterClearBtn" class="flex-1 h-10 rounded-lg border border-gray-200 dark:border-border-dark text-sm font-semibold hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">Clear All</button>
+                                    <button id="filterApplyBtn" class="flex-1 h-10 rounded-lg bg-primary text-white text-sm font-semibold hover:bg-primary/90 transition-colors">Apply</button>
+                                </div>
+                            </div>
                         </div>
                     </header>
                     <main id="statementsList" class="flex-1 p-4 space-y-3 pb-20">
@@ -450,12 +595,16 @@
             },
             async initList() {
                 try {
-                    const options = await api.getFilterOptions();
+                    const [options, categories] = await Promise.all([
+                        api.getFilterOptions(),
+                        api.getCategories()
+                    ]);
+
+                    // Store categories for tag label lookups
+                    appState._categories = categories;
 
                     const nameSelect = document.getElementById('filterAccountName');
-                    // Clear existing options except first
                     while (nameSelect.options.length > 1) nameSelect.remove(1);
-
                     options.account_names.forEach(name => {
                         const opt = document.createElement('option');
                         opt.value = name;
@@ -464,9 +613,7 @@
                     });
 
                     const typeSelect = document.getElementById('filterAccountType');
-                    // Clear existing options except first
                     while (typeSelect.options.length > 1) typeSelect.remove(1);
-
                     options.account_types.forEach(type => {
                         const opt = document.createElement('option');
                         opt.value = type;
@@ -474,23 +621,6 @@
                         typeSelect.appendChild(opt);
                     });
 
-                    // Set initial values from state
-                    nameSelect.value = appState.filters.accountName || '';
-                    typeSelect.value = appState.filters.accountType || '';
-
-                    nameSelect.onchange = () => {
-                        appState.filters.accountName = nameSelect.value;
-                        appState.listScroll = 0;
-                        this.loadStatements();
-                    };
-                    typeSelect.onchange = () => {
-                        appState.filters.accountType = typeSelect.value;
-                        appState.listScroll = 0;
-                        this.loadStatements();
-                    };
-
-                    // Category filter
-                    const categories = await api.getCategories();
                     const catSelect = document.getElementById('filterCategory');
                     while (catSelect.options.length > 1) catSelect.remove(1);
                     categories.forEach(cat => {
@@ -499,12 +629,110 @@
                         opt.textContent = cat.name;
                         catSelect.appendChild(opt);
                     });
+
+                    // Restore current filter values
+                    nameSelect.value = appState.filters.accountName || '';
+                    typeSelect.value = appState.filters.accountType || '';
                     catSelect.value = appState.filters.categoryId || '';
-                    catSelect.onchange = () => {
+
+                    // Filter popover toggle
+                    const popover = document.getElementById('filterPopover');
+                    const backdrop = document.getElementById('filterBackdrop');
+                    const toggleBtn = document.getElementById('filterBarToggle');
+
+                    const openPopover = () => {
+                        popover.classList.add('open');
+                        backdrop.classList.add('open');
+                    };
+                    const closePopover = () => {
+                        popover.classList.remove('open');
+                        backdrop.classList.remove('open');
+                    };
+
+                    toggleBtn.onclick = () => {
+                        popover.classList.contains('open') ? closePopover() : openPopover();
+                    };
+                    backdrop.onclick = closePopover;
+
+                    // Apply button — initialize Flatpickr date pickers
+                    const fpConfig = {
+                        dateFormat: 'Y-m-d',
+                        altInput: true,
+                        altFormat: 'd M Y',
+                        allowInput: false,
+                        theme: 'dark',
+                        disableMobile: true,
+                    };
+
+                    const dateFromInput = document.getElementById('filterDateFrom');
+                    const dateToInput = document.getElementById('filterDateTo');
+
+                    const fromPicker = flatpickr(dateFromInput, {
+                        ...fpConfig,
+                        defaultDate: appState.filters.dateFrom || null,
+                        onChange: (selectedDates) => {
+                            if (selectedDates.length) toPicker.set('minDate', selectedDates[0]);
+                        },
+                    });
+
+                    const toPicker = flatpickr(dateToInput, {
+                        ...fpConfig,
+                        defaultDate: appState.filters.dateTo || null,
+                        onChange: (selectedDates) => {
+                            if (selectedDates.length) fromPicker.set('maxDate', selectedDates[0]);
+                        },
+                    });
+
+                    // Set initial constraints if dates already selected
+                    if (appState.filters.dateFrom) toPicker.set('minDate', appState.filters.dateFrom);
+                    if (appState.filters.dateTo) fromPicker.set('maxDate', appState.filters.dateTo);
+
+                    // Store pickers on appState so removeFilter can access them
+                    appState._datePickers = { fromPicker, toPicker };
+
+                    document.getElementById('filterApplyBtn').onclick = () => {
+                        const fromVal = dateFromInput.value;
+                        const toVal = dateToInput.value;
+
+                        // Date validation
+                        if (fromVal && toVal && fromVal > toVal) {
+                            alert('"From Date" cannot be after "To Date". Please correct the date range.');
+                            return;
+                        }
+
+                        appState.filters.accountName = nameSelect.value;
+                        appState.filters.accountType = typeSelect.value;
                         appState.filters.categoryId = catSelect.value;
+                        appState.filters.dateFrom = fromVal;
+                        appState.filters.dateTo = toVal;
                         appState.listScroll = 0;
+                        closePopover();
+                        this.renderFilterTags();
                         this.loadStatements();
                     };
+
+                    // Clear button
+                    document.getElementById('filterClearBtn').onclick = () => {
+                        nameSelect.value = '';
+                        typeSelect.value = '';
+                        catSelect.value = '';
+                        fromPicker.clear();
+                        toPicker.clear();
+                        fromPicker.set('maxDate', null);
+                        toPicker.set('minDate', null);
+                        appState.filters.accountName = '';
+                        appState.filters.accountType = '';
+                        appState.filters.categoryId = '';
+                        appState.filters.dateFrom = '';
+                        appState.filters.dateTo = '';
+                        appState.listScroll = 0;
+                        closePopover();
+                        this.renderFilterTags();
+                        this.loadStatements();
+                    };
+
+                    // Render initial tags
+                    this.renderFilterTags();
                 } catch (e) { console.error(e); }
 
                 document.querySelectorAll('.filter-chip').forEach(chip => {
@@ -525,21 +753,37 @@
                 await this.loadStatements();
                 if (appState.listScroll) window.scrollTo(0, appState.listScroll);
             },
-            async loadStatements() {
+            async loadStatements(append = false) {
                 const list = document.getElementById('statementsList');
                 if (!list) return;
 
-                const { status, accountName, accountType, categoryId } = appState.filters;
+                const { status, accountName, accountType, categoryId, dateFrom, dateTo } = appState.filters;
                 const requestToken = ++appState.currentRequestToken;
 
-                list.innerHTML = '<div class="flex justify-center py-8"><div class="size-8 border-2 border-primary/30 border-t-primary rounded-full animate-spin"></div></div>';
-                try {
-                    const data = await api.getTransactions(status, selectedFile, accountName, accountType, categoryId);
+                if (!append) {
+                    // Fresh load: reset pagination state
+                    appState.loadedTransactions = [];
+                    appState.currentSkip = 0;
+                    list.innerHTML = '<div class="flex justify-center py-8"><div class="size-8 border-2 border-primary/30 border-t-primary rounded-full animate-spin"></div></div>';
+                } else {
+                    // Remove existing Load More button while loading
+                    const existingBtn = document.getElementById('loadMoreContainer');
+                    if (existingBtn) existingBtn.innerHTML = '<div class="flex justify-center py-4"><div class="size-6 border-2 border-primary/30 border-t-primary rounded-full animate-spin"></div></div>';
+                }
 
-                    // Race condition check: ignore if newer request started
+                try {
+                    const data = await api.getTransactions(status, selectedFile, accountName, accountType, categoryId, appState.currentSkip, PAGE_SIZE, dateFrom, dateTo);
+
+                    // Race condition check
                     if (requestToken !== appState.currentRequestToken) return;
 
-                    if (data.data.length === 0) {
+                    appState.totalTransactions = data.total;
+                    appState.loadedTransactions = append
+                        ? [...appState.loadedTransactions, ...data.data]
+                        : data.data;
+                    appState.currentSkip += data.data.length;
+
+                    if (appState.loadedTransactions.length === 0) {
                         list.innerHTML = `
                             <div class="text-center py-8">
                                 <p class="text-text-secondary mb-3">No transactions found</p>
@@ -550,7 +794,7 @@
                         return;
                     }
 
-                    list.innerHTML = data.data.map(t => `
+                    const transactionCards = appState.loadedTransactions.map(t => `
                         <div onclick="appState.listScroll = window.scrollY; router.navigate('details', {id: ${t.Id}})" class="bg-white dark:bg-surface-dark p-4 rounded-xl cursor-pointer hover:shadow-md transition-shadow">
                             <div class="flex justify-between items-start">
                                 <div class="flex-1 min-w-0 mr-3">
@@ -566,15 +810,109 @@
                             </div>
                         </div>
                     `).join('');
+
+                    const hasMore = appState.loadedTransactions.length < appState.totalTransactions;
+                    const paginationFooter = `
+                        <div id="loadMoreContainer" class="py-4 text-center">
+                            <p class="text-text-secondary text-sm mb-2">Showing ${appState.loadedTransactions.length} of ${appState.totalTransactions} transactions</p>
+                            ${hasMore ? `<button onclick="screens.loadStatements(true)" class="h-10 px-6 bg-primary text-white font-bold text-sm rounded-lg hover:bg-primary/90">Load More</button>` : ''}
+                        </div>`;
+
+                    list.innerHTML = transactionCards + paginationFooter;
                 } catch (e) {
                     if (requestToken === appState.currentRequestToken) {
-                        list.innerHTML = '<p class="text-center text-red-500 py-8">Failed to load</p>';
+                        if (!append) {
+                            list.innerHTML = '<p class="text-center text-red-500 py-8">Failed to load</p>';
+                        }
                     }
                 }
             },
 
+            renderFilterTags() {
+                const container = document.getElementById('activeFilterTags');
+                if (!container) return;
+
+                const { accountName, accountType, categoryId, dateFrom, dateTo } = appState.filters;
+                const tags = [];
+
+                if (accountName) {
+                    tags.push({ label: accountName, key: 'accountName', icon: 'account_balance' });
+                }
+                if (accountType) {
+                    tags.push({ label: accountType, key: 'accountType', icon: 'credit_card' });
+                }
+                if (categoryId) {
+                    const cat = (appState._categories || []).find(c => c.id == categoryId);
+                    tags.push({ label: cat ? cat.name : categoryId, key: 'categoryId', icon: 'category' });
+                }
+                if (dateFrom) {
+                    tags.push({ label: 'From: ' + new Date(dateFrom + 'T00:00:00').toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }), key: 'dateFrom', icon: 'calendar_month' });
+                }
+                if (dateTo) {
+                    tags.push({ label: 'To: ' + new Date(dateTo + 'T00:00:00').toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }), key: 'dateTo', icon: 'event' });
+                }
+
+                if (tags.length === 0) {
+                    container.classList.add('hidden');
+                    container.innerHTML = '';
+                    // Update filter button badge
+                    const toggle = document.getElementById('filterBarToggle');
+                    if (toggle) {
+                        toggle.className = 'flex items-center gap-1.5 h-8 px-3 rounded-full text-sm border transition-colors bg-white dark:bg-surface-dark border-gray-200 dark:border-gray-700 text-text-secondary hover:border-primary hover:text-primary';
+                        const badge = toggle.querySelector('.filter-badge');
+                        if (badge) badge.remove();
+                    }
+                    return;
+                }
+
+                container.classList.remove('hidden');
+                container.innerHTML = tags.map(tag => `
+                    <button onclick="screens.removeFilter('${tag.key}')" class="group flex items-center gap-1.5 h-7 pl-2.5 pr-2 rounded-full bg-primary/10 border border-primary/30 text-primary text-xs font-semibold hover:bg-primary/20 transition-colors">
+                        <span class="material-symbols-outlined text-sm">${tag.icon}</span>
+                        <span>${tag.label}</span>
+                        <span class="material-symbols-outlined text-sm opacity-60 group-hover:opacity-100">close</span>
+                    </button>
+                `).join('');
+
+                // Update filter button to show active state with badge
+                const toggle = document.getElementById('filterBarToggle');
+                if (toggle) {
+                    toggle.className = 'flex items-center gap-1.5 h-8 px-3 rounded-full text-sm border transition-colors bg-primary/10 border-primary text-primary';
+                    // Update or add badge
+                    let badge = toggle.querySelector('.filter-badge');
+                    if (!badge) {
+                        badge = document.createElement('span');
+                        badge.className = 'filter-badge w-5 h-5 rounded-full bg-primary text-white text-xs flex items-center justify-center font-bold';
+                        toggle.appendChild(badge);
+                    }
+                    badge.textContent = tags.length;
+                }
+            },
+
+            removeFilter(key) {
+                appState.filters[key] = '';
+                // Clear Flatpickr date pickers if removing a date filter
+                if (appState._datePickers) {
+                    if (key === 'dateFrom') {
+                        appState._datePickers.fromPicker.clear();
+                        appState._datePickers.toPicker.set('minDate', null);
+                    }
+                    if (key === 'dateTo') {
+                        appState._datePickers.toPicker.clear();
+                        appState._datePickers.fromPicker.set('maxDate', null);
+                    }
+                }
+                // Also update the input element in the popover
+                const selectMap = { accountName: 'filterAccountName', accountType: 'filterAccountType', categoryId: 'filterCategory' };
+                const el = document.getElementById(selectMap[key]);
+                if (el) el.value = '';
+                appState.listScroll = 0;
+                this.renderFilterTags();
+                this.loadStatements();
+            },
+
             clearFilters() {
-                appState.filters = { status: '', accountName: '', accountType: '', categoryId: '' };
+                appState.filters = { status: '', accountName: '', accountType: '', categoryId: '', dateFrom: '', dateTo: '' };
                 router.navigate('list'); // Re-renders header with correct state
             },
 
@@ -655,8 +993,10 @@
                     } catch (e) { console.error('Failed to load categories', e); }
 
                     if (t.Category) categorySelect.value = t.Category;
-                    if (t.Notes) notesInput.value = t.Notes;
-                    else notesInput.value = t.Details || '';
+                    // Use null check (not truthy) so empty string is respected as a valid saved value
+                    if (t.Notes != null && t.Notes !== '') notesInput.value = t.Notes;
+                    else if (t.Notes === '') notesInput.value = '';  // User intentionally cleared Notes
+                    else notesInput.value = t.Details || '';  // Notes was never set — show Details as default
 
                     footer.classList.remove('hidden');
                     const approveBtn = document.getElementById('approveBtn');

@@ -234,22 +234,39 @@ class ApiClient {
         accountName?: string,
         accountType?: string,
         categoryId?: string,
-        limit: number = 500
+        limit: number = 100,
+        skip: number = 0,
+        dateFrom?: string,
+        dateTo?: string
     ): Promise<{ data: Transaction[]; total: number }> {
         await this.ensureInit();
 
-        const transactions = await database.getTransactions(
-            statusFilter,
-            filenameFilter,
-            accountName,
-            accountType,
-            categoryId,
-            limit
-        );
+        const [transactions, total] = await Promise.all([
+            database.getTransactions(
+                statusFilter,
+                filenameFilter,
+                accountName,
+                accountType,
+                categoryId,
+                limit,
+                skip,
+                dateFrom,
+                dateTo
+            ),
+            database.getFilteredTransactionCount(
+                statusFilter,
+                filenameFilter,
+                accountName,
+                accountType,
+                categoryId,
+                dateFrom,
+                dateTo
+            )
+        ]);
 
         return {
             data: transactions as Transaction[],
-            total: transactions.length,
+            total,
         };
     }
 

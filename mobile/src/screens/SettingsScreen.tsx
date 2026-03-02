@@ -85,15 +85,30 @@ export default function SettingsScreen({ navigation }: Props) {
                 await storage.setLastSyncTime(syncTime);
                 setLastSyncTime(syncTime);
 
+                const message = `✅ Categories: ${result.categories.downloaded}⬇️ ${result.categories.uploaded}⬆️\n` +
+                    `✅ Accounts: ${result.accounts.downloaded}⬇️ ${result.accounts.uploaded}⬆️\n` +
+                    `✅ Transactions: ${result.transactions.downloaded}⬇️ ${result.transactions.uploaded}⬆️`;
+
                 Alert.alert(
                     'Sync Complete',
-                    `✅ Uploaded: ${result.uploaded} transactions\n✅ Downloaded: ${result.downloaded} transactions`,
+                    message,
                     [{ text: 'OK' }]
                 );
             } else {
+                let message = '';
+                // Check if we have the new structure (which we should)
+                if (result.categories && result.accounts && result.transactions) {
+                    message = `Categories: ${result.categories.downloaded}⬇️ ${result.categories.uploaded}⬆️\n` +
+                        `Accounts: ${result.accounts.downloaded}⬇️ ${result.accounts.uploaded}⬆️\n` +
+                        `Transactions: ${result.transactions.downloaded}⬇️ ${result.transactions.uploaded}⬆️`;
+                } else {
+                    // Fallback for safety
+                    message = 'Sync failed. Check errors.';
+                }
+
                 Alert.alert(
                     'Sync Completed with Errors',
-                    `Uploaded: ${result.uploaded}\nDownloaded: ${result.downloaded}\n\nErrors:\n${result.errors.join('\n')}`,
+                    `${message}\n\nErrors:\n${result.errors.join('\n')}`,
                     [{ text: 'OK' }]
                 );
             }

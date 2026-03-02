@@ -70,8 +70,10 @@ export default function DetailsScreen({ navigation, route }: Props) {
                 }
             }
 
-            if (trxData.Notes) setNotes(trxData.Notes);
-            else setNotes(trxData.Details || '');
+            // Use null check (not truthy) so empty string is respected as a valid saved value
+            if (trxData.Notes != null && trxData.Notes !== '') setNotes(trxData.Notes);
+            else if (trxData.Notes === '') setNotes('');  // User intentionally cleared Notes
+            else setNotes(trxData.Details || '');  // Notes was never set — show Details as default
         } catch (e) {
             Alert.alert('Error', 'Failed to load data');
             console.error(e);

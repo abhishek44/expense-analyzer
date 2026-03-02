@@ -2,7 +2,8 @@
 
 import uuid
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List
+from dateutil import parser as date_parser
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field, field_validator
@@ -80,16 +81,37 @@ class UpdateAccountRequest(BaseModel):
         return v
 
 
+class AccountBatchUpsert(BaseModel):
+    """Model for batch upserting accounts from mobile sync."""
+    id: str  # UUID from mobile
+    name: str
+    account_type: str
+    currency: str = "INR"
+    opening_balance: float = 0.0
+    is_archived: int = 0
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
 @router.get("/accounts", summary="Get all accounts")
 async def get_accounts(
     include_archived: bool = False,
+    since: Optional[str] = None,
     db: Session = Depends(get_db)
 ) -> dict:
-    """Get all accounts with computed balances."""
+    """Get all accounts with computed balances. Use 'since' parameter for incremental sync."""
     query = db.query(Account)
     
     if not include_archived:
         query = query.filter(Account.is_archived == 0)
+    
+    # Filter by updated_at for incremental sync
+    if since:
+        try:
+            since_dt = date_parser.parse(since)
+            query = query.filter(Account.updated_at >= since_dt)
+        except (ValueError, TypeError):
+            pass  # Ignore invalid date format
     
     accounts = query.order_by(Account.name).all()
     
@@ -179,6 +201,62 @@ async def create_account(
         "success": True,
         "message": "Account created successfully",
         "account": account_dict
+    }
+
+
+@router.post("/accounts/batch", summary="Batch upsert accounts")
+async def upsert_accounts(
+    accounts: List[AccountBatchUpsert],
+    db: Session = Depends(get_db)
+) -> dict:
+    """Batch upsert accounts for sync. Updates existing or inserts new."""
+    results = []
+    
+    for acc_data in accounts:
+        existing = db.query(Account).filter(Account.id == acc_data.id).first()
+        
+        if existing:
+            # Update if mobile version is newer
+            mobile_updated = None
+            if acc_data.updated_at:
+                try:
+                    mobile_updated = date_parser.parse(acc_data.updated_at)
+                except (ValueError, TypeError):
+                    mobile_updated = None
+            
+            # Update if mobile has newer timestamp or no timestamp comparison possible
+            if mobile_updated is None or existing.updated_at is None or mobile_updated > existing.updated_at:
+                existing.name = acc_data.name
+                existing.account_type = acc_data.account_type
+                existing.currency = acc_data.currency
+                existing.opening_balance = acc_data.opening_balance
+                existing.is_archived = acc_data.is_archived
+                existing.updated_at = datetime.now()
+            results.append(existing)
+        else:
+            # Insert new
+            now = datetime.now()
+            account = Account(
+                id=acc_data.id,
+                name=acc_data.name,
+                account_type=acc_data.account_type,
+                currency=acc_data.currency,
+                opening_balance=acc_data.opening_balance,
+                is_archived=acc_data.is_archived,
+                created_at=now,
+                updated_at=now
+            )
+            db.add(account)
+            results.append(account)
+    
+    db.commit()
+    for acc in results:
+        db.refresh(acc)
+    
+    return {
+        "success": True,
+        "message": f"Synced {len(results)} accounts",
+        "accounts": [a.to_dict() for a in results]
     }
 
 

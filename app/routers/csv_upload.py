@@ -147,9 +147,13 @@ async def get_transactions(
     account_name: Optional[str] = None,
     account_type: Optional[str] = None,
     category_id: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
     db: Session = Depends(get_db)
 ) -> dict:
     """Get transactions with pagination and optional filters."""
+    from datetime import datetime as dt
+
     query = db.query(Transaction)
     
     if status_filter and status_filter in [s.value for s in ReviewStatus]:
@@ -166,6 +170,27 @@ async def get_transactions(
     
     if category_id:
         query = query.filter(Transaction.category_id == category_id)
+
+    # Date range filtering — dates stored as DD-MM-YYYY strings
+    # Use SQLite's substr to rearrange to YYYY-MM-DD for correct string comparison
+    if date_from:
+        try:
+            d = dt.strptime(date_from, "%Y-%m-%d")
+            # Convert DD-MM-YYYY to YYYY-MM-DD for comparison using SQLite substr
+            from sqlalchemy import func
+            date_expr = func.substr(Transaction.Date, 7, 4) + '-' + func.substr(Transaction.Date, 4, 2) + '-' + func.substr(Transaction.Date, 1, 2)
+            query = query.filter(date_expr >= date_from)
+        except ValueError:
+            pass  # Invalid date format, skip filter
+
+    if date_to:
+        try:
+            d = dt.strptime(date_to, "%Y-%m-%d")
+            from sqlalchemy import func
+            date_expr = func.substr(Transaction.Date, 7, 4) + '-' + func.substr(Transaction.Date, 4, 2) + '-' + func.substr(Transaction.Date, 1, 2)
+            query = query.filter(date_expr <= date_to)
+        except ValueError:
+            pass  # Invalid date format, skip filter
     
     total = query.count()
     records = query.order_by(Transaction.Id.desc()).offset(skip).limit(limit).all()

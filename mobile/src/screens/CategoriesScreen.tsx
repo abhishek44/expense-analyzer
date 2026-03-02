@@ -286,20 +286,26 @@ const styles = StyleSheet.create({
         marginTop: spacing.xs,
     },
     grid: {
-        flexDirection: 'row',
-        flexWrap: 'wrap',
-        gap: spacing.md,
+        flexDirection: 'column', // Changed to column for list view
+        gap: spacing.sm, // Reduced gap for list items
     },
     categoryCard: {
-        width: '47%', // 2 columns with gap
-        backgroundColor: colors.surfaceDark,
-        borderRadius: borderRadius.lg,
-        padding: spacing.md,
+        width: '100%', // Full width
+        backgroundColor: 'transparent', // Transparent background for list look (or keep surface if they want cards)
+        // Let's keep it clean like the reference
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        borderWidth: 1,
-        borderColor: colors.borderDark,
+        paddingVertical: spacing.sm,
+        paddingHorizontal: spacing.sm,
+        // Removed border and background to match the reference "clean list" style, 
+        // but user said "without modifying colour combination". 
+        // The reference has a dark background and list items. 
+        // The current app has cards. 
+        // I will make it look like the reference: Dark background (already is), items are rows.
+        // I'll leave a subtle separator or just spacing.
+        borderBottomWidth: 1,
+        borderBottomColor: colors.borderDark,
     },
     categoryInfo: {
         flexDirection: 'row',
@@ -307,36 +313,36 @@ const styles = StyleSheet.create({
         flex: 1,
     },
     iconPlaceholder: {
-        width: 32,
-        height: 32,
-        borderRadius: 16,
+        width: 40, // Slightly larger for list view
+        height: 40,
+        borderRadius: 20,
         alignItems: 'center',
         justifyContent: 'center',
-        marginRight: spacing.sm,
+        marginRight: spacing.md,
     },
     iconText: {
         color: colors.textPrimary,
         fontWeight: 'bold',
-        fontSize: 14,
+        fontSize: 16,
     },
     categoryName: {
         color: colors.textPrimary,
-        fontSize: 14,
+        fontSize: 16, // Larger font for list
         fontWeight: '500',
         flex: 1,
     },
     actionButtons: {
         flexDirection: 'row',
         alignItems: 'center',
+        gap: spacing.sm,
     },
     actionButton: {
         padding: spacing.xs,
         marginLeft: spacing.xs,
     },
     editIcon: {
-        color: colors.primary,
-        fontSize: 18,
-        fontWeight: 'bold',
+        color: colors.textSecondary, // Muted color for actions
+        fontSize: 16,
     },
     deleteButton: {
         padding: spacing.xs,

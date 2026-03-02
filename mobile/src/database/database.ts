@@ -140,6 +140,16 @@ class Database {
                 synced_at TEXT
             );
 
+            CREATE TABLE IF NOT EXISTS synced_categories (
+                id TEXT PRIMARY KEY,
+                synced_at TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS synced_accounts (
+                id TEXT PRIMARY KEY,
+                synced_at TEXT
+            );
+
             CREATE TABLE IF NOT EXISTS accounts (
                 id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
@@ -303,7 +313,10 @@ class Database {
         accountName?: string,
         accountType?: string,
         categoryId?: string,
-        limit: number = 500
+        limit: number = 100,
+        skip: number = 0,
+        dateFrom?: string,
+        dateTo?: string
     ): Promise<Transaction[]> {
         await this.ensureInit();
         if (!this.db) throw new Error('Database not initialized');
@@ -336,11 +349,78 @@ class Database {
             params.push(categoryId);
         }
 
-        query += ' ORDER BY Id DESC LIMIT ?';
-        params.push(limit);
+        // Date range filtering — dates stored as DD-MM-YYYY strings
+        if (dateFrom) {
+            query += " AND (substr(Date, 7, 4) || '-' || substr(Date, 4, 2) || '-' || substr(Date, 1, 2)) >= ?";
+            params.push(dateFrom);
+        }
+        if (dateTo) {
+            query += " AND (substr(Date, 7, 4) || '-' || substr(Date, 4, 2) || '-' || substr(Date, 1, 2)) <= ?";
+            params.push(dateTo);
+        }
+
+        query += ' ORDER BY Id DESC LIMIT ? OFFSET ?';
+        params.push(limit, skip);
 
         const result = await this.db.getAllAsync<Transaction>(query, params);
         return result;
+    }
+
+    /**
+     * Get total count of transactions matching filters (for pagination)
+     */
+    async getFilteredTransactionCount(
+        statusFilter?: string,
+        filenameFilter?: string,
+        accountName?: string,
+        accountType?: string,
+        categoryId?: string,
+        dateFrom?: string,
+        dateTo?: string
+    ): Promise<number> {
+        await this.ensureInit();
+        if (!this.db) throw new Error('Database not initialized');
+
+        let query = 'SELECT COUNT(*) as count FROM transactions WHERE 1=1';
+        const params: any[] = [];
+
+        if (statusFilter) {
+            query += ' AND review_status = ?';
+            params.push(statusFilter);
+        }
+
+        if (filenameFilter) {
+            query += ' AND filename = ?';
+            params.push(filenameFilter);
+        }
+
+        if (accountName) {
+            query += ' AND Account_name LIKE ?';
+            params.push(`%${accountName}%`);
+        }
+
+        if (accountType) {
+            query += ' AND Account_type LIKE ?';
+            params.push(`%${accountType}%`);
+        }
+
+        if (categoryId) {
+            query += ' AND category_id = ?';
+            params.push(categoryId);
+        }
+
+        // Date range filtering
+        if (dateFrom) {
+            query += " AND (substr(Date, 7, 4) || '-' || substr(Date, 4, 2) || '-' || substr(Date, 1, 2)) >= ?";
+            params.push(dateFrom);
+        }
+        if (dateTo) {
+            query += " AND (substr(Date, 7, 4) || '-' || substr(Date, 4, 2) || '-' || substr(Date, 1, 2)) <= ?";
+            params.push(dateTo);
+        }
+
+        const result = await this.db.getFirstAsync<{ count: number }>(query, params);
+        return result?.count ?? 0;
     }
 
     /**
@@ -854,6 +934,198 @@ class Database {
         values.push(id);
         const query = `UPDATE categories SET ${fields.join(', ')} WHERE id = ?`;
         await this.db.runAsync(query, values);
+    }
+
+    // ==================== SYNC METHODS ====================
+
+    /**
+     * Mark categories as synced
+     */
+    async markCategoriesAsSynced(ids: string[]): Promise<void> {
+        await this.ensureInit();
+        if (!this.db) throw new Error('Database not initialized');
+
+        const syncedAt = new Date().toISOString();
+
+        await this.db.withTransactionAsync(async () => {
+            for (const id of ids) {
+                await this.db!.runAsync(
+                    'INSERT OR REPLACE INTO synced_categories (id, synced_at) VALUES (?, ?)',
+                    [id, syncedAt]
+                );
+            }
+        });
+    }
+
+    /**
+     * Get all synced category IDs
+     */
+    async getSyncedCategoryIds(): Promise<string[]> {
+        await this.ensureInit();
+        if (!this.db) throw new Error('Database not initialized');
+
+        const result = await this.db.getAllAsync<{ id: string }>(
+            'SELECT id FROM synced_categories'
+        );
+
+        return result.map(r => r.id);
+    }
+
+    /**
+     * Mark accounts as synced
+     */
+    async markAccountsAsSynced(ids: string[]): Promise<void> {
+        await this.ensureInit();
+        if (!this.db) throw new Error('Database not initialized');
+
+        const syncedAt = new Date().toISOString();
+
+        await this.db.withTransactionAsync(async () => {
+            for (const id of ids) {
+                await this.db!.runAsync(
+                    'INSERT OR REPLACE INTO synced_accounts (id, synced_at) VALUES (?, ?)',
+                    [id, syncedAt]
+                );
+            }
+        });
+    }
+
+    /**
+     * Get all synced account IDs
+     */
+    async getSyncedAccountIds(): Promise<string[]> {
+        await this.ensureInit();
+        if (!this.db) throw new Error('Database not initialized');
+
+        const result = await this.db.getAllAsync<{ id: string }>(
+            'SELECT id FROM synced_accounts'
+        );
+
+        return result.map(r => r.id);
+    }
+
+    /**
+     * Upsert a category (insert or update)
+     */
+    async upsertCategory(category: Category): Promise<void> {
+        await this.ensureInit();
+        if (!this.db) throw new Error('Database not initialized');
+
+        const existing = await this.db.getFirstAsync<Category>(
+            'SELECT * FROM categories WHERE id = ?',
+            [category.id]
+        );
+
+        if (existing) {
+            // Update if the incoming data is newer
+            const existingUpdatedAt = new Date(existing.updated_at).getTime();
+            const incomingUpdatedAt = new Date(category.updated_at).getTime();
+
+            if (incomingUpdatedAt > existingUpdatedAt) {
+                await this.db.runAsync(
+                    `UPDATE categories SET name = ?, type = ?, icon = ?, color = ?, is_archived = ?, updated_at = ? WHERE id = ?`,
+                    [
+                        category.name,
+                        category.type,
+                        category.icon || null,
+                        category.color || null,
+                        category.is_archived,
+                        category.updated_at,
+                        category.id
+                    ]
+                );
+            }
+        } else {
+            await this.db.runAsync(
+                `INSERT INTO categories (id, name, type, icon, color, is_archived, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+                [
+                    category.id,
+                    category.name,
+                    category.type,
+                    category.icon || null,
+                    category.color || null,
+                    category.is_archived,
+                    category.created_at,
+                    category.updated_at
+                ]
+            );
+        }
+    }
+
+    /**
+     * Upsert an account (insert or update)
+     */
+    async upsertAccount(account: Account): Promise<void> {
+        await this.ensureInit();
+        if (!this.db) throw new Error('Database not initialized');
+
+        const existing = await this.db.getFirstAsync<Account>(
+            'SELECT * FROM accounts WHERE id = ?',
+            [account.id]
+        );
+
+        if (existing) {
+            // Update if the incoming data is newer
+            const existingUpdatedAt = new Date(existing.updated_at).getTime();
+            const incomingUpdatedAt = new Date(account.updated_at).getTime();
+
+            if (incomingUpdatedAt > existingUpdatedAt) {
+                await this.db.runAsync(
+                    `UPDATE accounts SET name = ?, account_type = ?, currency = ?, opening_balance = ?, is_archived = ?, updated_at = ? WHERE id = ?`,
+                    [
+                        account.name,
+                        account.account_type,
+                        account.currency,
+                        account.opening_balance,
+                        account.is_archived,
+                        account.updated_at,
+                        account.id
+                    ]
+                );
+            }
+        } else {
+            await this.db.runAsync(
+                `INSERT INTO accounts (id, name, account_type, currency, opening_balance, is_archived, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+                [
+                    account.id,
+                    account.name,
+                    account.account_type,
+                    account.currency,
+                    account.opening_balance,
+                    account.is_archived,
+                    account.created_at,
+                    account.updated_at
+                ]
+            );
+        }
+    }
+
+    /**
+     * Export all categories for sync
+     */
+    async exportAllCategories(): Promise<Category[]> {
+        await this.ensureInit();
+        if (!this.db) throw new Error('Database not initialized');
+
+        const result = await this.db.getAllAsync<Category>(
+            'SELECT * FROM categories ORDER BY name ASC'
+        );
+
+        return result;
+    }
+
+    /**
+     * Export all accounts for sync
+     */
+    async exportAllAccounts(): Promise<Account[]> {
+        await this.ensureInit();
+        if (!this.db) throw new Error('Database not initialized');
+
+        const result = await this.db.getAllAsync<Account>(
+            'SELECT * FROM accounts ORDER BY name ASC'
+        );
+
+        return result;
     }
 }
 
