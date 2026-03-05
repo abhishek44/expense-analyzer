@@ -1,0 +1,1368 @@
+<!DOCTYPE html>
+<html class="dark" lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <meta content="width=device-width, initial-scale=1.0, viewport-fit=cover" name="viewport" />
+    <title>Analytics — Expense Tracker</title>
+    <meta name="description" content="Analyze your spending patterns, category breakdowns, and account activity" />
+
+    <link href="https://fonts.googleapis.com" rel="preconnect" />
+    <link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect" />
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap"
+        rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap"
+        rel="stylesheet" />
+
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+    <script>
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "primary": "#137fec",
+                        "background-light": "#f6f7f8",
+                        "background-dark": "#101922",
+                        "surface-dark": "#1c232d",
+                        "surface-dark-2": "#232d3a",
+                        "border-dark": "#2a3441",
+                        "text-secondary": "#9dabb9"
+                    },
+                    fontFamily: { "display": ["Manrope", "sans-serif"] },
+                },
+            },
+        }
+    </script>
+    <style>
+        body {
+            min-height: 100dvh;
+        }
+
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+
+        .no-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+
+        .no-scrollbar {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+
+        .tab-active {
+            background: linear-gradient(135deg, #137fec, #0e6bcf);
+            color: white;
+            box-shadow: 0 4px 15px rgba(19, 127, 236, 0.3);
+        }
+
+        .tab-inactive {
+            background: #1c232d;
+            color: #9dabb9;
+        }
+
+        .tab-inactive:hover {
+            background: #232d3a;
+            color: white;
+        }
+
+        .stat-card {
+            background: linear-gradient(145deg, #1c232d, #232d3a);
+            border: 1px solid #2a3441;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .stat-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.3);
+        }
+
+        .heatmap-cell {
+            border-radius: 3px;
+            transition: transform 0.15s;
+        }
+
+        .heatmap-cell:hover {
+            transform: scale(1.4);
+            z-index: 10;
+        }
+
+        .chart-container {
+            background: linear-gradient(145deg, #1c232d, #1e2835);
+            border: 1px solid #2a3441;
+            border-radius: 16px;
+            padding: 24px;
+        }
+
+        .category-bar {
+            transition: width 0.8s ease-out;
+        }
+
+        .fade-in {
+            animation: fadeIn 0.4s ease-out;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(8px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .table-row:hover {
+            background: #232d3a;
+        }
+
+        .skeleton {
+            background: linear-gradient(90deg, #1c232d 25%, #2a3441 50%, #1c232d 75%);
+            background-size: 200% 100%;
+            animation: shimmer 1.5s infinite;
+            border-radius: 8px;
+        }
+
+        @keyframes shimmer {
+            0% {
+                background-position: 200% 0;
+            }
+
+            100% {
+                background-position: -200% 0;
+            }
+        }
+
+        /* Custom scrollbar for tables */
+        .custom-scroll::-webkit-scrollbar {
+            height: 6px;
+        }
+
+        .custom-scroll::-webkit-scrollbar-track {
+            background: #1c232d;
+            border-radius: 3px;
+        }
+
+        .custom-scroll::-webkit-scrollbar-thumb {
+            background: #2a3441;
+            border-radius: 3px;
+        }
+
+        .custom-scroll::-webkit-scrollbar-thumb:hover {
+            background: #3a4a5a;
+        }
+
+        /* Transaction Modal */
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 100;
+            background: rgba(0, 0, 0, 0.6);
+            backdrop-filter: blur(4px);
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.25s ease;
+        }
+
+        .modal-overlay.active {
+            opacity: 1;
+            pointer-events: all;
+        }
+
+        .modal-panel {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            z-index: 101;
+            max-height: 85vh;
+            background: linear-gradient(145deg, #1c232d, #1e2835);
+            border-top-left-radius: 24px;
+            border-top-right-radius: 24px;
+            border: 1px solid #2a3441;
+            border-bottom: none;
+            transform: translateY(100%);
+            transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            display: flex;
+            flex-direction: column;
+        }
+
+        .modal-panel.active {
+            transform: translateY(0);
+        }
+
+        .modal-handle {
+            width: 40px;
+            height: 4px;
+            background: #3a4a5a;
+            border-radius: 2px;
+            margin: 12px auto 0;
+            flex-shrink: 0;
+        }
+    </style>
+</head>
+
+<body class="bg-background-light dark:bg-background-dark text-gray-900 dark:text-white font-display">
+    <div id="app" class="min-h-screen flex flex-col"></div>
+
+    <script>
+        const API_BASE = '/api/analytics';
+
+        // Chart.js global defaults for dark theme
+        Chart.defaults.color = '#9dabb9';
+        Chart.defaults.borderColor = '#2a3441';
+        Chart.defaults.font.family = 'Manrope, sans-serif';
+
+        // Color palette
+        const COLORS = {
+            primary: '#137fec',
+            green: '#22c55e',
+            red: '#ef4444',
+            yellow: '#eab308',
+            purple: '#a855f7',
+            pink: '#ec4899',
+            cyan: '#06b6d4',
+            orange: '#f97316',
+            lime: '#84cc16',
+            indigo: '#6366f1',
+            teal: '#14b8a6',
+            rose: '#f43f5e'
+        };
+        const CHART_COLORS = [
+            '#137fec', '#22c55e', '#ef4444', '#eab308', '#a855f7',
+            '#ec4899', '#06b6d4', '#f97316', '#84cc16', '#6366f1',
+            '#14b8a6', '#f43f5e', '#8b5cf6', '#10b981', '#f59e0b',
+            '#3b82f6', '#e11d48', '#0891b2', '#d946ef', '#65a30d'
+        ];
+
+        // State
+        let currentTab = 'overview';
+        let cachedData = {};
+        let chartInstances = {};
+
+        // API
+        const api = {
+            async getSpendingOverview(year = null) {
+                let url = `${API_BASE}/spending-overview`;
+                if (year) url += `?year=${year}`;
+                const res = await fetch(url);
+                return res.json();
+            },
+            async getCategoryBreakdown(months = 6, year = null, month = null) {
+                let url = `${API_BASE}/category-breakdown?months=${months}`;
+                if (year) url += `&year=${year}`;
+                if (month) url += `&month=${month}`;
+                const res = await fetch(url);
+                return res.json();
+            },
+            async getCategoryTransactions(category, year = null, month = null) {
+                let url = `${API_BASE}/category-transactions?category=${encodeURIComponent(category)}`;
+                if (year) url += `&year=${year}`;
+                if (month) url += `&month=${month}`;
+                const res = await fetch(url);
+                return res.json();
+            },
+            async getAccountAnalysis() {
+                const res = await fetch(`${API_BASE}/account-analysis`);
+                return res.json();
+            },
+            async getTopTransactions(limit = 10) {
+                const res = await fetch(`${API_BASE}/top-transactions?limit=${limit}`);
+                return res.json();
+            }
+        };
+
+        // Utility
+        function formatCurrency(amount) {
+            return '₹' + Math.abs(amount).toLocaleString('en-IN', { maximumFractionDigits: 0 });
+        }
+
+        function formatMonth(monthStr) {
+            const [y, m] = monthStr.split('-');
+            const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+            return months[parseInt(m) - 1] + ' ' + y.slice(2);
+        }
+
+        function destroyCharts() {
+            Object.values(chartInstances).forEach(c => c.destroy());
+            chartInstances = {};
+        }
+
+        function showSkeleton(containerId, count = 3) {
+            const el = document.getElementById(containerId);
+            if (!el) return;
+            el.innerHTML = Array(count).fill('').map(() =>
+                `<div class="skeleton h-32 w-full mb-4"></div>`
+            ).join('');
+        }
+
+        // Layout
+        function renderShell() {
+            const app = document.getElementById('app');
+            app.innerHTML = `
+            <div class="flex flex-col min-h-screen">
+                <!-- Header -->
+                <header class="sticky top-0 z-30 bg-background-dark/95 backdrop-blur-sm border-b border-border-dark">
+                    <div class="flex items-center justify-between p-4">
+                        <div class="flex items-center gap-3">
+                            <a href="/" class="p-2 -ml-2 rounded-full hover:bg-surface-dark transition-colors">
+                                <span class="material-symbols-outlined">arrow_back</span>
+                            </a>
+                            <div>
+                                <h1 class="text-xl font-bold">Analytics</h1>
+                                <p class="text-xs text-text-secondary">Insights from your transactions</p>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <span class="material-symbols-outlined text-primary text-3xl">insights</span>
+                        </div>
+                    </div>
+                    <!-- Tabs -->
+                    <div class="flex gap-2 px-4 pb-3 overflow-x-auto no-scrollbar">
+                        <button onclick="switchTab('overview')" id="tab-overview" class="tab-btn shrink-0 h-9 px-5 rounded-full text-sm font-bold transition-all duration-200">
+                            <span class="flex items-center gap-1.5"><span class="material-symbols-outlined text-base">trending_up</span>Overview</span>
+                        </button>
+                        <button onclick="switchTab('categories')" id="tab-categories" class="tab-btn shrink-0 h-9 px-5 rounded-full text-sm font-bold transition-all duration-200">
+                            <span class="flex items-center gap-1.5"><span class="material-symbols-outlined text-base">donut_large</span>Categories</span>
+                        </button>
+                        <button onclick="switchTab('accounts')" id="tab-accounts" class="tab-btn shrink-0 h-9 px-5 rounded-full text-sm font-bold transition-all duration-200">
+                            <span class="flex items-center gap-1.5"><span class="material-symbols-outlined text-base">account_balance</span>Accounts</span>
+                        </button>
+                        <button onclick="switchTab('top')" id="tab-top" class="tab-btn shrink-0 h-9 px-5 rounded-full text-sm font-bold transition-all duration-200">
+                            <span class="flex items-center gap-1.5"><span class="material-symbols-outlined text-base">star</span>Top</span>
+                        </button>
+                    </div>
+                </header>
+
+                <!-- Content -->
+                <main id="analyticsContent" class="flex-1 p-4 pb-8 max-w-5xl mx-auto w-full">
+                </main>
+            </div>
+
+            <!-- Transaction Modal -->
+            <div id="modalOverlay" class="modal-overlay" onclick="closeCategoryModal()"></div>
+            <div id="modalPanel" class="modal-panel">
+                <div class="modal-handle"></div>
+                <div id="modalHeader" class="p-5 pb-3 flex items-center justify-between flex-shrink-0">
+                    <div>
+                        <h3 id="modalTitle" class="font-bold text-lg"></h3>
+                        <p id="modalSubtitle" class="text-xs text-text-secondary mt-0.5"></p>
+                    </div>
+                    <button onclick="closeCategoryModal()" class="p-2 rounded-full hover:bg-surface-dark-2 transition-colors">
+                        <span class="material-symbols-outlined">close</span>
+                    </button>
+                </div>
+                <div id="modalBody" class="flex-1 overflow-y-auto px-5 pb-8 custom-scroll"></div>
+            </div>
+            `;
+
+            updateTabs();
+            loadTab(currentTab);
+        }
+
+        function updateTabs() {
+            document.querySelectorAll('.tab-btn').forEach(btn => {
+                const tab = btn.id.replace('tab-', '');
+                if (tab === currentTab) {
+                    btn.className = btn.className.replace('tab-inactive', '').replace('tab-active', '') + ' tab-active';
+                    btn.classList.remove('tab-inactive');
+                    btn.classList.add('tab-active');
+                } else {
+                    btn.className = btn.className.replace('tab-active', '').replace('tab-inactive', '') + ' tab-inactive';
+                    btn.classList.remove('tab-active');
+                    btn.classList.add('tab-inactive');
+                }
+            });
+        }
+
+        function switchTab(tab) {
+            if (tab === currentTab) return;
+            destroyCharts();
+            currentTab = tab;
+            updateTabs();
+            loadTab(tab);
+        }
+
+        async function loadTab(tab) {
+            const content = document.getElementById('analyticsContent');
+            content.innerHTML = `<div class="space-y-4">${Array(3).fill('<div class="skeleton h-40 w-full"></div>').join('')}</div>`;
+
+            try {
+                switch (tab) {
+                    case 'overview': await renderOverview(content); break;
+                    case 'categories': await renderCategories(content); break;
+                    case 'accounts': await renderAccounts(content); break;
+                    case 'top': await renderTop(content); break;
+                }
+            } catch (e) {
+                console.error(e);
+                content.innerHTML = `
+                    <div class="flex flex-col items-center justify-center py-16 text-text-secondary">
+                        <span class="material-symbols-outlined text-4xl mb-3 text-red-500">error</span>
+                        <p class="font-bold text-white">Failed to load data</p>
+                        <p class="text-sm mt-1">${e.message}</p>
+                        <button onclick="loadTab('${tab}')" class="mt-4 px-6 h-10 bg-primary text-white rounded-full font-bold text-sm hover:bg-primary/90 transition-colors">Retry</button>
+                    </div>`;
+            }
+        }
+
+        // =====================================================================
+        // TAB 1: SPENDING OVERVIEW
+        // =====================================================================
+        async function renderOverview(container) {
+            const data = await api.getSpendingOverview();
+            cachedData.overview = data;
+
+            container.innerHTML = `<div class="space-y-5 fade-in">
+                <!-- Summary Cards -->
+                <div class="grid grid-cols-3 gap-3">
+                    <div class="stat-card rounded-2xl p-4">
+                        <p class="text-text-secondary text-xs font-medium mb-1">Total Spent</p>
+                        <p class="text-xl font-extrabold text-red-400">${formatCurrency(data.total_debit)}</p>
+                    </div>
+                    <div class="stat-card rounded-2xl p-4">
+                        <p class="text-text-secondary text-xs font-medium mb-1">Total Income</p>
+                        <p class="text-xl font-extrabold text-green-400">${formatCurrency(data.total_credit)}</p>
+                    </div>
+                    <div class="stat-card rounded-2xl p-4">
+                        <p class="text-text-secondary text-xs font-medium mb-1">Net Flow</p>
+                        <p class="text-xl font-extrabold ${data.net >= 0 ? 'text-green-400' : 'text-red-400'}">${data.net >= 0 ? '+' : '-'}${formatCurrency(data.net)}</p>
+                    </div>
+                </div>
+
+                <!-- Monthly Trend Chart -->
+                <div class="chart-container">
+                    <div class="flex items-center justify-between mb-4">
+                        <h3 class="font-bold text-lg">Monthly Trend</h3>
+                        <span class="text-xs text-text-secondary">${data.monthly.length} months</span>
+                    </div>
+                    <div style="height: 300px;">
+                        <canvas id="monthlyTrendChart"></canvas>
+                    </div>
+                </div>
+
+                <!-- Heatmap -->
+                <div class="chart-container">
+                    <div class="flex items-center justify-between mb-4">
+                        <h3 class="font-bold text-lg">Spending Heatmap</h3>
+                        <span class="text-xs text-text-secondary">Daily activity</span>
+                    </div>
+                    <div id="heatmapContainer" class="overflow-x-auto custom-scroll pb-2"></div>
+                </div>
+
+                <!-- Monthly Table -->
+                <div class="chart-container">
+                    <h3 class="font-bold text-lg mb-4">Monthly Breakdown</h3>
+                    <div class="overflow-x-auto custom-scroll">
+                        <table class="w-full text-sm">
+                            <thead>
+                                <tr class="text-text-secondary text-xs border-b border-border-dark">
+                                    <th class="text-left pb-3 font-medium">Month</th>
+                                    <th class="text-right pb-3 font-medium">Debit</th>
+                                    <th class="text-right pb-3 font-medium">Credit</th>
+                                    <th class="text-right pb-3 font-medium">Net</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${data.monthly.slice().reverse().map(m => `
+                                    <tr class="table-row border-b border-border-dark/50 transition-colors">
+                                        <td class="py-3 font-medium">${formatMonth(m.month)}</td>
+                                        <td class="py-3 text-right text-red-400">${formatCurrency(m.total_debit)}</td>
+                                        <td class="py-3 text-right text-green-400">${formatCurrency(m.total_credit)}</td>
+                                        <td class="py-3 text-right font-bold ${m.net >= 0 ? 'text-green-400' : 'text-red-400'}">${m.net >= 0 ? '+' : ''}${formatCurrency(m.net)}</td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>`;
+
+            // Monthly trend chart
+            const ctx = document.getElementById('monthlyTrendChart').getContext('2d');
+            chartInstances.monthlyTrend = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: data.monthly.map(m => formatMonth(m.month)),
+                    datasets: [
+                        {
+                            label: 'Spent',
+                            data: data.monthly.map(m => m.total_debit),
+                            backgroundColor: 'rgba(239, 68, 68, 0.7)',
+                            borderColor: '#ef4444',
+                            borderWidth: 1,
+                            borderRadius: 6,
+                            order: 2,
+                        },
+                        {
+                            label: 'Income',
+                            data: data.monthly.map(m => m.total_credit),
+                            backgroundColor: 'rgba(34, 197, 94, 0.7)',
+                            borderColor: '#22c55e',
+                            borderWidth: 1,
+                            borderRadius: 6,
+                            order: 2,
+                        },
+                        {
+                            label: 'Net Flow',
+                            data: data.monthly.map(m => m.net),
+                            type: 'line',
+                            borderColor: '#137fec',
+                            backgroundColor: 'rgba(19, 127, 236, 0.1)',
+                            fill: true,
+                            tension: 0.4,
+                            pointRadius: 4,
+                            pointBackgroundColor: '#137fec',
+                            borderWidth: 2,
+                            order: 1,
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: { intersect: false, mode: 'index' },
+                    plugins: {
+                        legend: { position: 'top', labels: { usePointStyle: true, padding: 15 } },
+                        tooltip: {
+                            backgroundColor: '#1c232d',
+                            borderColor: '#2a3441',
+                            borderWidth: 1,
+                            titleFont: { weight: 'bold' },
+                            callbacks: { label: (ctx) => `${ctx.dataset.label}: ${formatCurrency(ctx.parsed.y)}` }
+                        }
+                    },
+                    scales: {
+                        y: {
+                            grid: { color: 'rgba(42, 52, 65, 0.5)' },
+                            ticks: { callback: v => formatCurrency(v) }
+                        },
+                        x: { grid: { display: false } }
+                    }
+                }
+            });
+
+            // Heatmap
+            renderHeatmap(data.daily);
+        }
+
+        function renderHeatmap(dailyData) {
+            const container = document.getElementById('heatmapContainer');
+            if (!container || dailyData.length === 0) return;
+
+            const amounts = dailyData.map(d => d.amount);
+            const maxAmount = Math.max(...amounts);
+            const dateMap = {};
+            dailyData.forEach(d => { dateMap[d.date] = d.amount; });
+
+            // Find date range
+            const dates = dailyData.map(d => new Date(d.date)).sort((a, b) => a - b);
+            const startDate = new Date(dates[0]);
+            startDate.setDate(startDate.getDate() - startDate.getDay()); // align to Sunday
+            const endDate = dates[dates.length - 1];
+
+            const weeks = [];
+            let current = new Date(startDate);
+            let currentWeek = [];
+
+            while (current <= endDate) {
+                currentWeek.push(new Date(current));
+                if (currentWeek.length === 7) {
+                    weeks.push(currentWeek);
+                    currentWeek = [];
+                }
+                current.setDate(current.getDate() + 1);
+            }
+            if (currentWeek.length > 0) weeks.push(currentWeek);
+
+            const dayLabels = ['', 'Mon', '', 'Wed', '', 'Fri', ''];
+
+            function getColor(amount) {
+                if (!amount || amount === 0) return '#1c232d';
+                const intensity = Math.min(amount / (maxAmount * 0.5), 1);
+                if (intensity < 0.25) return '#0e4429';
+                if (intensity < 0.5) return '#006d32';
+                if (intensity < 0.75) return '#26a641';
+                return '#39d353';
+            }
+
+            let html = `<div class="flex gap-1">
+                <div class="flex flex-col gap-1 mr-1 text-xs text-text-secondary pt-0" style="min-width: 28px;">
+                    ${dayLabels.map(l => `<div class="h-3 flex items-center">${l}</div>`).join('')}
+                </div>
+                <div class="flex gap-1">`;
+
+            weeks.forEach(week => {
+                html += '<div class="flex flex-col gap-1">';
+                week.forEach(day => {
+                    const key = day.toISOString().split('T')[0];
+                    const amount = dateMap[key] || 0;
+                    const color = getColor(amount);
+                    html += `<div class="heatmap-cell w-3 h-3 relative cursor-pointer" style="background:${color}" title="${key}: ${formatCurrency(amount)}"></div>`;
+                });
+                html += '</div>';
+            });
+
+            html += '</div></div>';
+
+            // Legend
+            html += `<div class="flex items-center gap-2 mt-3 text-xs text-text-secondary">
+                <span>Less</span>
+                <div class="heatmap-cell w-3 h-3" style="background:#1c232d"></div>
+                <div class="heatmap-cell w-3 h-3" style="background:#0e4429"></div>
+                <div class="heatmap-cell w-3 h-3" style="background:#006d32"></div>
+                <div class="heatmap-cell w-3 h-3" style="background:#26a641"></div>
+                <div class="heatmap-cell w-3 h-3" style="background:#39d353"></div>
+                <span>More</span>
+            </div>`;
+
+            container.innerHTML = html;
+        }
+
+        // =====================================================================
+        // TAB 2: CATEGORY BREAKDOWN
+        // =====================================================================
+        let categoryFilterState = { year: null, month: null, expandedCategory: null };
+        const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+        async function renderCategories(container) {
+            // Initial load to get available years
+            const initData = await api.getCategoryBreakdown(12);
+            categoryFilterState.availableYears = initData.available_years || [];
+
+            container.innerHTML = `<div class="space-y-5 fade-in">
+                <!-- Period Filter -->
+                <div class="chart-container">
+                    <div class="flex items-center justify-between mb-3">
+                        <h3 class="font-bold text-lg">Period</h3>
+                        <button id="catFilterReset" onclick="resetCategoryFilter()" class="text-xs text-primary hover:underline hidden">Reset</button>
+                    </div>
+                    <div class="flex gap-2 flex-wrap mb-3">
+                        <button onclick="setCategoryYear(null)" id="catYearAll" class="cat-year-btn h-8 px-4 rounded-full text-sm font-bold transition-all">All Time</button>
+                        ${categoryFilterState.availableYears.map(y => `
+                            <button onclick="setCategoryYear(${y})" id="catYear${y}" class="cat-year-btn h-8 px-4 rounded-full text-sm font-bold transition-all">${y}</button>
+                        `).join('')}
+                    </div>
+                    <div id="catMonthRow" class="hidden">
+                        <div class="flex gap-1.5 flex-wrap">
+                            <button onclick="setCategoryMonth(null)" id="catMonthAll" class="cat-month-btn h-7 px-3 rounded-full text-xs font-bold transition-all">Full Year</button>
+                            ${MONTH_NAMES.map((m, i) => `
+                                <button onclick="setCategoryMonth(${i + 1})" id="catMonth${i + 1}" class="cat-month-btn h-7 px-3 rounded-full text-xs font-bold transition-all">${m}</button>
+                            `).join('')}
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Dynamic content area -->
+                <div id="catDynamicContent">
+                    <div class="skeleton h-40 w-full"></div>
+                </div>
+            </div>`;
+
+            // Initial render
+            await updateCategoryView(initData);
+            updateCategoryFilterUI();
+        }
+
+        function updateCategoryFilterUI() {
+            const { year, month } = categoryFilterState;
+            document.querySelectorAll('.cat-year-btn').forEach(btn => {
+                const isActive = (btn.id === 'catYearAll' && !year) || btn.id === `catYear${year}`;
+                btn.className = `cat-year-btn h-8 px-4 rounded-full text-sm font-bold transition-all ${isActive ? 'tab-active' : 'tab-inactive'}`;
+            });
+
+            const monthRow = document.getElementById('catMonthRow');
+            if (year) {
+                monthRow?.classList.remove('hidden');
+                document.querySelectorAll('.cat-month-btn').forEach(btn => {
+                    const isActive = (btn.id === 'catMonthAll' && !month) || btn.id === `catMonth${month}`;
+                    btn.className = `cat-month-btn h-7 px-3 rounded-full text-xs font-bold transition-all ${isActive ? 'tab-active' : 'tab-inactive'}`;
+                });
+            } else {
+                monthRow?.classList.add('hidden');
+            }
+
+            const resetBtn = document.getElementById('catFilterReset');
+            if (resetBtn) {
+                if (year || month) resetBtn.classList.remove('hidden');
+                else resetBtn.classList.add('hidden');
+            }
+        }
+
+        async function setCategoryYear(year) {
+            categoryFilterState.year = year;
+            categoryFilterState.month = null;
+            categoryFilterState.expandedCategory = null;
+            updateCategoryFilterUI();
+            await refreshCategoryData();
+        }
+
+        async function setCategoryMonth(month) {
+            categoryFilterState.month = month;
+            categoryFilterState.expandedCategory = null;
+            updateCategoryFilterUI();
+            await refreshCategoryData();
+        }
+
+        async function resetCategoryFilter() {
+            categoryFilterState.year = null;
+            categoryFilterState.month = null;
+            categoryFilterState.expandedCategory = null;
+            updateCategoryFilterUI();
+            await refreshCategoryData();
+        }
+
+        async function refreshCategoryData() {
+            const dynamicEl = document.getElementById('catDynamicContent');
+            if (!dynamicEl) return;
+            dynamicEl.innerHTML = '<div class="skeleton h-40 w-full"></div>';
+
+            const { year, month } = categoryFilterState;
+            const data = await api.getCategoryBreakdown(12, year, month);
+            await updateCategoryView(data);
+        }
+
+        async function updateCategoryView(data) {
+            const dynamicEl = document.getElementById('catDynamicContent');
+            if (!dynamicEl) return;
+
+            // Destroy old charts
+            if (chartInstances.categoryDonut) { chartInstances.categoryDonut.destroy(); delete chartInstances.categoryDonut; }
+            if (chartInstances.categoryMonthly) { chartInstances.categoryMonthly.destroy(); delete chartInstances.categoryMonthly; }
+
+            cachedData.categories = data;
+            const { year, month } = categoryFilterState;
+
+            dynamicEl.innerHTML = `
+                <!-- Total -->
+                <div class="stat-card rounded-2xl p-5 mb-5">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <p class="text-text-secondary text-xs font-medium mb-1">Total Spending · ${data.period_label || 'All Time'}</p>
+                            <p class="text-2xl font-extrabold text-red-400">${formatCurrency(data.grand_total)}</p>
+                            <p class="text-xs text-text-secondary mt-1">${data.categories.length} categories</p>
+                        </div>
+                        <div class="w-12 h-12 rounded-full bg-red-500/10 flex items-center justify-center">
+                            <span class="material-symbols-outlined text-red-400">payments</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Donut + Legend -->
+                <div class="chart-container mb-5">
+                    <h3 class="font-bold text-lg mb-4">Category Distribution</h3>
+                    <div class="flex flex-col lg:flex-row items-center gap-6">
+                        <div style="width: 280px; height: 280px;" class="shrink-0">
+                            <canvas id="categoryDonutChart"></canvas>
+                        </div>
+                        <div class="flex-1 w-full max-h-72 overflow-y-auto custom-scroll space-y-2">
+                            ${data.categories.map((c, i) => `
+                                <div class="flex items-center gap-3 p-2 rounded-lg hover:bg-surface-dark-2 transition-colors">
+                                    <div class="w-3 h-3 rounded-full shrink-0" style="background:${CHART_COLORS[i % CHART_COLORS.length]}"></div>
+                                    <span class="flex-1 text-sm font-medium truncate">${c.name}</span>
+                                    <span class="text-sm font-bold text-right">${formatCurrency(c.total)}</span>
+                                    <span class="text-xs text-text-secondary w-12 text-right">${c.percentage}%</span>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Monthly Stacked Bar (hidden when viewing single month) -->
+                ${!month ? `
+                <div class="chart-container mb-5">
+                    <h3 class="font-bold text-lg mb-4">Category Trends by Month</h3>
+                    <div style="height: 350px;">
+                        <canvas id="categoryMonthlyChart"></canvas>
+                    </div>
+                </div>` : ''}
+
+                <!-- Category Ranking (clickable - opens modal) -->
+                <div class="chart-container">
+                    <div class="flex items-center justify-between mb-4">
+                        <h3 class="font-bold text-lg">Category Ranking</h3>
+                        <span class="text-xs text-text-secondary">Tap to view transactions</span>
+                    </div>
+                    <div id="catRankingList" class="space-y-2">
+                        ${data.categories.map((c, i) => `
+                            <div onclick="openCategoryModal('${c.name.replace(/'/g, "\\\'")}', ${c.total}, '${c.percentage}', '${CHART_COLORS[i % CHART_COLORS.length]}')"
+                                 class="rounded-xl p-3 cursor-pointer hover:bg-surface-dark-2 active:scale-[0.98] transition-all duration-150">
+                                <div class="flex items-center gap-3 mb-1.5">
+                                    <span class="text-xs text-text-secondary font-mono w-5">#${i + 1}</span>
+                                    <div class="w-3 h-3 rounded-full shrink-0" style="background:${CHART_COLORS[i % CHART_COLORS.length]}"></div>
+                                    <span class="flex-1 text-sm font-medium truncate">${c.name}</span>
+                                    <span class="text-sm font-bold">${formatCurrency(c.total)}</span>
+                                    <span class="text-xs text-text-secondary w-10 text-right">${c.percentage}%</span>
+                                    <span class="material-symbols-outlined text-text-secondary text-base">chevron_right</span>
+                                </div>
+                                <div class="h-1.5 bg-surface-dark-2 rounded-full overflow-hidden ml-8">
+                                    <div class="category-bar h-full rounded-full" style="width:${c.percentage}%; background:${CHART_COLORS[i % CHART_COLORS.length]}"></div>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+
+            // Donut chart
+            buildCategoryDonut(data);
+
+            // Monthly stacked bar (only if not single month view)
+            if (!month && document.getElementById('categoryMonthlyChart')) {
+                buildCategoryMonthlyChart(data);
+            }
+        }
+
+        function buildCategoryDonut(data) {
+            const canvas = document.getElementById('categoryDonutChart');
+            if (!canvas) return;
+            const top8 = data.categories.slice(0, 8);
+            const othersTotal = data.categories.slice(8).reduce((s, c) => s + c.total, 0);
+            const donutLabels = top8.map(c => c.name);
+            const donutData = top8.map(c => c.total);
+            if (othersTotal > 0) {
+                donutLabels.push('Others');
+                donutData.push(othersTotal);
+            }
+
+            chartInstances.categoryDonut = new Chart(canvas.getContext('2d'), {
+                type: 'doughnut',
+                data: {
+                    labels: donutLabels,
+                    datasets: [{
+                        data: donutData,
+                        backgroundColor: CHART_COLORS.slice(0, donutLabels.length),
+                        borderColor: '#1c232d',
+                        borderWidth: 3,
+                        hoverOffset: 8,
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    cutout: '60%',
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            backgroundColor: '#1c232d',
+                            borderColor: '#2a3441',
+                            borderWidth: 1,
+                            callbacks: {
+                                label: (ctx) => `${ctx.label}: ${formatCurrency(ctx.parsed)} (${((ctx.parsed / data.grand_total) * 100).toFixed(1)}%)`
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        function buildCategoryMonthlyChart(data) {
+            const canvas = document.getElementById('categoryMonthlyChart');
+            if (!canvas || data.monthly.length === 0) return;
+
+            const topCats = data.categories.slice(0, 6).map(c => c.name);
+            chartInstances.categoryMonthly = new Chart(canvas.getContext('2d'), {
+                type: 'bar',
+                data: {
+                    labels: data.monthly.map(m => formatMonth(m.month)),
+                    datasets: topCats.map((cat, i) => ({
+                        label: cat,
+                        data: data.monthly.map(m => {
+                            const found = m.categories.find(c => c.name === cat);
+                            return found ? found.total : 0;
+                        }),
+                        backgroundColor: CHART_COLORS[i],
+                        borderRadius: 4,
+                    }))
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { position: 'top', labels: { usePointStyle: true, padding: 12, font: { size: 11 } } },
+                        tooltip: {
+                            backgroundColor: '#1c232d',
+                            borderColor: '#2a3441',
+                            borderWidth: 1,
+                            callbacks: { label: ctx => `${ctx.dataset.label}: ${formatCurrency(ctx.parsed.y)}` }
+                        }
+                    },
+                    scales: {
+                        x: { stacked: true, grid: { display: false } },
+                        y: {
+                            stacked: true,
+                            grid: { color: 'rgba(42, 52, 65, 0.5)' },
+                            ticks: { callback: v => formatCurrency(v) }
+                        }
+                    }
+                }
+            });
+        }
+
+        async function openCategoryModal(categoryName, total, percentage, color) {
+            const overlay = document.getElementById('modalOverlay');
+            const panel = document.getElementById('modalPanel');
+            const title = document.getElementById('modalTitle');
+            const subtitle = document.getElementById('modalSubtitle');
+            const body = document.getElementById('modalBody');
+
+            // Set header
+            const { year, month } = categoryFilterState;
+            let periodText = 'All Time';
+            if (year && month) {
+                periodText = `${MONTH_NAMES[month - 1]} ${year}`;
+            } else if (year) {
+                periodText = `${year}`;
+            }
+            title.innerHTML = `<span class="inline-block w-3 h-3 rounded-full mr-2 align-middle" style="background:${color}"></span>${categoryName}`;
+            subtitle.textContent = `${periodText} · ${formatCurrency(total)} · ${percentage}% of total`;
+
+            // Show modal with loading state
+            body.innerHTML = `
+                <div class="space-y-3 py-4">
+                    <div class="skeleton h-12 w-full"></div>
+                    <div class="skeleton h-12 w-full"></div>
+                    <div class="skeleton h-12 w-full"></div>
+                </div>`;
+
+            // Animate in
+            overlay.classList.add('active');
+            requestAnimationFrame(() => panel.classList.add('active'));
+            document.body.style.overflow = 'hidden';
+
+            // Fetch transactions
+            try {
+                const data = await api.getCategoryTransactions(categoryName, year, month);
+                if (data.transactions.length === 0) {
+                    body.innerHTML = `
+                        <div class="flex flex-col items-center justify-center py-12 text-text-secondary">
+                            <span class="material-symbols-outlined text-3xl mb-2">receipt_long</span>
+                            <p class="font-medium">No transactions found</p>
+                            <p class="text-xs mt-1">Try a different time period</p>
+                        </div>`;
+                    return;
+                }
+
+                body.innerHTML = `
+                    <div class="flex items-center justify-between py-3 px-1 mb-2 border-b border-border-dark">
+                        <span class="text-sm font-bold">${data.count} transaction${data.count > 1 ? 's' : ''}</span>
+                        <span class="text-sm font-bold text-red-400">${formatCurrency(data.total)}</span>
+                    </div>
+                    <div class="space-y-2">
+                        ${data.transactions.map((t, i) => `
+                            <div class="flex items-start gap-3 p-3 rounded-xl bg-surface-dark-2 hover:bg-border-dark transition-colors">
+                                <div class="w-8 h-8 rounded-full bg-background-dark flex items-center justify-center shrink-0 mt-0.5">
+                                    <span class="text-xs font-bold text-text-secondary">${i + 1}</span>
+                                </div>
+                                <div class="flex-1 min-w-0">
+                                    <p class="text-sm font-medium leading-snug" title="${t.details}">${t.details || 'Transaction'}</p>
+                                    <div class="flex items-center gap-2 mt-1 flex-wrap">
+                                        <span class="text-xs text-text-secondary">${t.date}</span>
+                                        ${t.account ? `<span class="text-xs px-1.5 py-0.5 rounded bg-background-dark text-text-secondary">${t.account}</span>` : ''}
+                                        ${t.notes ? `<span class="text-xs text-text-secondary italic truncate max-w-[150px]" title="${t.notes}">${t.notes}</span>` : ''}
+                                    </div>
+                                </div>
+                                <span class="font-bold text-red-400 text-sm shrink-0 mt-0.5">${formatCurrency(t.debit)}</span>
+                            </div>
+                        `).join('')}
+                    </div>`;
+            } catch (e) {
+                body.innerHTML = `
+                    <div class="flex flex-col items-center justify-center py-12">
+                        <span class="material-symbols-outlined text-3xl text-red-400 mb-2">error</span>
+                        <p class="text-red-400 font-medium">Failed to load transactions</p>
+                        <p class="text-xs text-text-secondary mt-1">${e.message}</p>
+                        <button onclick="openCategoryModal('${categoryName.replace(/'/g, "\\\'")}', ${total}, '${percentage}', '${color}')" class="mt-4 px-5 h-9 bg-primary text-white rounded-full text-sm font-bold">Retry</button>
+                    </div>`;
+            }
+        }
+
+        function closeCategoryModal() {
+            const overlay = document.getElementById('modalOverlay');
+            const panel = document.getElementById('modalPanel');
+            panel.classList.remove('active');
+            setTimeout(() => {
+                overlay.classList.remove('active');
+                document.body.style.overflow = '';
+            }, 300);
+        }
+
+        // =====================================================================
+        // TAB 3: ACCOUNT ANALYSIS
+        // =====================================================================
+        async function renderAccounts(container) {
+            const data = await api.getAccountAnalysis();
+            cachedData.accounts = data;
+
+            container.innerHTML = `<div class="space-y-5 fade-in">
+                <!-- Account Type Distribution -->
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div class="chart-container">
+                        <h3 class="font-bold text-lg mb-4">By Account Type</h3>
+                        <div style="height: 250px;">
+                            <canvas id="accountTypePieChart"></canvas>
+                        </div>
+                    </div>
+                    <div class="chart-container">
+                        <h3 class="font-bold text-lg mb-4">Type Summary</h3>
+                        <div class="space-y-4">
+                            ${data.by_type.map((t, i) => `
+                                <div class="p-3 bg-surface-dark-2 rounded-xl">
+                                    <div class="flex items-center justify-between mb-2">
+                                        <div class="flex items-center gap-2">
+                                            <div class="w-3 h-3 rounded-full" style="background:${CHART_COLORS[i]}"></div>
+                                            <span class="font-bold">${t.type}</span>
+                                        </div>
+                                        <span class="text-xs text-text-secondary">${t.count} txns</span>
+                                    </div>
+                                    <div class="grid grid-cols-2 gap-2 text-sm">
+                                        <div>
+                                            <span class="text-text-secondary text-xs">Debit</span>
+                                            <p class="font-bold text-red-400">${formatCurrency(t.total_debit)}</p>
+                                        </div>
+                                        <div>
+                                            <span class="text-text-secondary text-xs">Credit</span>
+                                            <p class="font-bold text-green-400">${formatCurrency(t.total_credit)}</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Per-Account Bar Chart -->
+                <div class="chart-container">
+                    <h3 class="font-bold text-lg mb-4">Debit vs Credit by Account</h3>
+                    <div style="height: 350px;">
+                        <canvas id="accountBarChart"></canvas>
+                    </div>
+                </div>
+
+                <!-- Monthly Account Trend -->
+                <div class="chart-container">
+                    <h3 class="font-bold text-lg mb-4">Monthly Spending by Account</h3>
+                    <div style="height: 300px;">
+                        <canvas id="accountMonthlyChart"></canvas>
+                    </div>
+                </div>
+
+                <!-- Account Table -->
+                <div class="chart-container">
+                    <h3 class="font-bold text-lg mb-4">Account Details</h3>
+                    <div class="overflow-x-auto custom-scroll">
+                        <table class="w-full text-sm">
+                            <thead>
+                                <tr class="text-text-secondary text-xs border-b border-border-dark">
+                                    <th class="text-left pb-3 font-medium">Account</th>
+                                    <th class="text-right pb-3 font-medium">Transactions</th>
+                                    <th class="text-right pb-3 font-medium">Total Debit</th>
+                                    <th class="text-right pb-3 font-medium">Total Credit</th>
+                                    <th class="text-right pb-3 font-medium">Net</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${data.by_account.map(a => {
+                const net = a.total_credit - a.total_debit;
+                return `
+                                    <tr class="table-row border-b border-border-dark/50 transition-colors">
+                                        <td class="py-3 font-medium">${a.name}</td>
+                                        <td class="py-3 text-right text-text-secondary">${a.count}</td>
+                                        <td class="py-3 text-right text-red-400">${formatCurrency(a.total_debit)}</td>
+                                        <td class="py-3 text-right text-green-400">${formatCurrency(a.total_credit)}</td>
+                                        <td class="py-3 text-right font-bold ${net >= 0 ? 'text-green-400' : 'text-red-400'}">${net >= 0 ? '+' : ''}${formatCurrency(net)}</td>
+                                    </tr>`;
+            }).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>`;
+
+            // Account type pie chart
+            const pieCtx = document.getElementById('accountTypePieChart').getContext('2d');
+            chartInstances.accountTypePie = new Chart(pieCtx, {
+                type: 'doughnut',
+                data: {
+                    labels: data.by_type.map(t => t.type),
+                    datasets: [{
+                        data: data.by_type.map(t => t.total_debit),
+                        backgroundColor: CHART_COLORS.slice(0, data.by_type.length),
+                        borderColor: '#1c232d',
+                        borderWidth: 3,
+                        hoverOffset: 8,
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    cutout: '55%',
+                    plugins: {
+                        legend: { position: 'bottom', labels: { usePointStyle: true, padding: 15 } },
+                        tooltip: {
+                            backgroundColor: '#1c232d',
+                            borderColor: '#2a3441',
+                            borderWidth: 1,
+                            callbacks: { label: ctx => `${ctx.label}: ${formatCurrency(ctx.parsed)}` }
+                        }
+                    }
+                }
+            });
+
+            // Per-account grouped bar chart
+            const barCtx = document.getElementById('accountBarChart').getContext('2d');
+            chartInstances.accountBar = new Chart(barCtx, {
+                type: 'bar',
+                data: {
+                    labels: data.by_account.map(a => a.name),
+                    datasets: [
+                        {
+                            label: 'Debit',
+                            data: data.by_account.map(a => a.total_debit),
+                            backgroundColor: 'rgba(239, 68, 68, 0.7)',
+                            borderColor: '#ef4444',
+                            borderWidth: 1,
+                            borderRadius: 6,
+                        },
+                        {
+                            label: 'Credit',
+                            data: data.by_account.map(a => a.total_credit),
+                            backgroundColor: 'rgba(34, 197, 94, 0.7)',
+                            borderColor: '#22c55e',
+                            borderWidth: 1,
+                            borderRadius: 6,
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { position: 'top', labels: { usePointStyle: true, padding: 15 } },
+                        tooltip: {
+                            backgroundColor: '#1c232d',
+                            borderColor: '#2a3441',
+                            borderWidth: 1,
+                            callbacks: { label: ctx => `${ctx.dataset.label}: ${formatCurrency(ctx.parsed.y)}` }
+                        }
+                    },
+                    scales: {
+                        y: {
+                            grid: { color: 'rgba(42, 52, 65, 0.5)' },
+                            ticks: { callback: v => formatCurrency(v) }
+                        },
+                        x: { grid: { display: false } }
+                    }
+                }
+            });
+
+            // Monthly account trend (line chart for top accounts)
+            const topAccounts = data.by_account.slice(0, 5).map(a => a.name);
+            const lineCtx = document.getElementById('accountMonthlyChart').getContext('2d');
+            chartInstances.accountMonthly = new Chart(lineCtx, {
+                type: 'line',
+                data: {
+                    labels: data.monthly.map(m => formatMonth(m.month)),
+                    datasets: topAccounts.map((acc, i) => ({
+                        label: acc,
+                        data: data.monthly.map(m => {
+                            const found = m.accounts.find(a => a.name === acc);
+                            return found ? found.debit : 0;
+                        }),
+                        borderColor: CHART_COLORS[i],
+                        backgroundColor: CHART_COLORS[i] + '15',
+                        fill: false,
+                        tension: 0.4,
+                        pointRadius: 3,
+                        borderWidth: 2,
+                    }))
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: { intersect: false, mode: 'index' },
+                    plugins: {
+                        legend: { position: 'top', labels: { usePointStyle: true, padding: 12, font: { size: 11 } } },
+                        tooltip: {
+                            backgroundColor: '#1c232d',
+                            borderColor: '#2a3441',
+                            borderWidth: 1,
+                            callbacks: { label: ctx => `${ctx.dataset.label}: ${formatCurrency(ctx.parsed.y)}` }
+                        }
+                    },
+                    scales: {
+                        y: {
+                            grid: { color: 'rgba(42, 52, 65, 0.5)' },
+                            ticks: { callback: v => formatCurrency(v) }
+                        },
+                        x: { grid: { display: false } }
+                    }
+                }
+            });
+        }
+
+        // =====================================================================
+        // TAB 4: TOP TRANSACTIONS & PATTERNS
+        // =====================================================================
+        async function renderTop(container) {
+            const data = await api.getTopTransactions(15);
+            cachedData.top = data;
+
+            container.innerHTML = `<div class="space-y-5 fade-in">
+                <!-- Top Merchants -->
+                <div class="chart-container">
+                    <div class="flex items-center justify-between mb-4">
+                        <h3 class="font-bold text-lg">Top Merchants</h3>
+                        <span class="text-xs text-text-secondary">By total spend</span>
+                    </div>
+                    <div style="height: 350px;">
+                        <canvas id="topMerchantsChart"></canvas>
+                    </div>
+                </div>
+
+                <!-- Merchants Table -->
+                <div class="chart-container">
+                    <h3 class="font-bold text-lg mb-4">Merchant Details</h3>
+                    <div class="overflow-x-auto custom-scroll">
+                        <table class="w-full text-sm">
+                            <thead>
+                                <tr class="text-text-secondary text-xs border-b border-border-dark">
+                                    <th class="text-left pb-3 font-medium">#</th>
+                                    <th class="text-left pb-3 font-medium">Merchant</th>
+                                    <th class="text-right pb-3 font-medium">Count</th>
+                                    <th class="text-right pb-3 font-medium">Total</th>
+                                    <th class="text-right pb-3 font-medium">Avg</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${data.top_merchants.map((m, i) => `
+                                    <tr class="table-row border-b border-border-dark/50 transition-colors">
+                                        <td class="py-3 text-text-secondary">${i + 1}</td>
+                                        <td class="py-3 font-medium max-w-[200px] truncate" title="${m.name}">${m.name}</td>
+                                        <td class="py-3 text-right">${m.count}</td>
+                                        <td class="py-3 text-right font-bold text-red-400">${formatCurrency(m.total)}</td>
+                                        <td class="py-3 text-right text-text-secondary">${formatCurrency(m.total / m.count)}</td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Recurring Payments -->
+                ${data.recurring.length > 0 ? `
+                <div class="chart-container">
+                    <div class="flex items-center gap-2 mb-4">
+                        <span class="material-symbols-outlined text-yellow-400">autorenew</span>
+                        <h3 class="font-bold text-lg">Recurring Patterns</h3>
+                    </div>
+                    <p class="text-text-secondary text-sm mb-4">Merchants with 3+ transactions</p>
+                    <div class="space-y-3">
+                        ${data.recurring.map((r, i) => `
+                            <div class="flex items-center justify-between p-3 bg-surface-dark-2 rounded-xl hover:bg-border-dark transition-colors">
+                                <div class="flex-1 min-w-0">
+                                    <p class="font-medium text-sm truncate" title="${r.name}">${r.name}</p>
+                                    <p class="text-xs text-text-secondary">${r.count} occurrences · avg ${formatCurrency(r.avg)}</p>
+                                </div>
+                                <span class="font-bold text-red-400 shrink-0 ml-3">${formatCurrency(r.total)}</span>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>` : ''}
+
+                <!-- Largest Debits -->
+                <div class="chart-container">
+                    <div class="flex items-center gap-2 mb-4">
+                        <span class="material-symbols-outlined text-red-400">arrow_downward</span>
+                        <h3 class="font-bold text-lg">Largest Expenses</h3>
+                    </div>
+                    <div class="space-y-2">
+                        ${data.largest_debits.map((t, i) => `
+                            <div class="flex items-center gap-3 p-3 bg-surface-dark-2 rounded-xl hover:bg-border-dark transition-colors">
+                                <span class="text-lg font-extrabold text-text-secondary w-8 text-center">${i + 1}</span>
+                                <div class="flex-1 min-w-0">
+                                    <p class="font-medium text-sm truncate">${t.details}</p>
+                                    <p class="text-xs text-text-secondary">${t.date || 'N/A'} · ${t.account || 'N/A'}${t.category ? ' · ' + t.category : ''}</p>
+                                </div>
+                                <span class="font-bold text-red-400 shrink-0">${formatCurrency(t.debit)}</span>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+
+                <!-- Largest Credits -->
+                <div class="chart-container">
+                    <div class="flex items-center gap-2 mb-4">
+                        <span class="material-symbols-outlined text-green-400">arrow_upward</span>
+                        <h3 class="font-bold text-lg">Largest Income</h3>
+                    </div>
+                    <div class="space-y-2">
+                        ${data.largest_credits.map((t, i) => `
+                            <div class="flex items-center gap-3 p-3 bg-surface-dark-2 rounded-xl hover:bg-border-dark transition-colors">
+                                <span class="text-lg font-extrabold text-text-secondary w-8 text-center">${i + 1}</span>
+                                <div class="flex-1 min-w-0">
+                                    <p class="font-medium text-sm truncate">${t.details}</p>
+                                    <p class="text-xs text-text-secondary">${t.date || 'N/A'} · ${t.account || 'N/A'}${t.category ? ' · ' + t.category : ''}</p>
+                                </div>
+                                <span class="font-bold text-green-400 shrink-0">${formatCurrency(t.credit)}</span>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            </div>`;
+
+            // Top merchants horizontal bar chart
+            const top10 = data.top_merchants.slice(0, 10);
+            const barCtx = document.getElementById('topMerchantsChart').getContext('2d');
+            chartInstances.topMerchants = new Chart(barCtx, {
+                type: 'bar',
+                data: {
+                    labels: top10.map(m => m.name.length > 25 ? m.name.slice(0, 25) + '…' : m.name),
+                    datasets: [{
+                        label: 'Total Spent',
+                        data: top10.map(m => m.total),
+                        backgroundColor: CHART_COLORS.slice(0, 10),
+                        borderRadius: 6,
+                    }]
+                },
+                options: {
+                    indexAxis: 'y',
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            backgroundColor: '#1c232d',
+                            borderColor: '#2a3441',
+                            borderWidth: 1,
+                            callbacks: {
+                                title: (items) => data.top_merchants[items[0].dataIndex].name,
+                                label: ctx => `Total: ${formatCurrency(ctx.parsed.x)} (${data.top_merchants[ctx.dataIndex].count} txns)`
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            grid: { color: 'rgba(42, 52, 65, 0.5)' },
+                            ticks: { callback: v => formatCurrency(v) }
+                        },
+                        y: {
+                            grid: { display: false },
+                            ticks: { font: { size: 11 } }
+                        }
+                    }
+                }
+            });
+        }
+
+        // Initialize
+        renderShell();
+    </script>
+</body>
+
+</html>
