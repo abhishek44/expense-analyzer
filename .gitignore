@@ -25,3 +25,4 @@ app/services/__pycache__/__init__.cpython-310.pyc
 app/services/__pycache__/csv_service.cpython-310.pyc
 app/routers/__pycache__/accounts.cpython-310.pyc
 app/routers/__pycache__/categories.cpython-310.pyc
+app/routers/__pycache__/analytics.cpython-310.pyc
