@@ -44,19 +44,16 @@ app.include_router(accounts.router)
 app.include_router(categories.router)
 app.include_router(analytics.router)
 
-# Mount static files
-app_static_path = Path(__file__).parent / "static"
-static_path = Path(__file__).parent.parent / "static"
-if app_static_path.exists():
-    app.mount("/app-static", StaticFiles(directory=str(app_static_path)), name="app-static")
-if static_path.exists():
-    app.mount("/static", StaticFiles(directory=str(static_path)), name="static")
+# Mount static files — both index.html and analytics.html live in app/static/
+static_dir = Path(__file__).parent / "static"
+if static_dir.exists():
+    app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
 
 @app.get("/", include_in_schema=False)
 async def serve_frontend():
     """Serve the frontend SPA."""
-    index_path = static_path / "index.html"
+    index_path = static_dir / "index.html"
     if index_path.exists():
         return FileResponse(str(index_path))
     return {"message": "Frontend not found. Access API docs at /docs"}
@@ -65,7 +62,7 @@ async def serve_frontend():
 @app.get("/analytics", include_in_schema=False)
 async def serve_analytics():
     """Serve the analytics page."""
-    analytics_path = app_static_path / "analytics.html"
+    analytics_path = static_dir / "analytics.html"
     if analytics_path.exists():
         return FileResponse(str(analytics_path))
     return {"message": "Analytics page not found."}
