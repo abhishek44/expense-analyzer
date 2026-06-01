@@ -10,7 +10,7 @@ from fastapi.responses import FileResponse
 
 from app.config import settings
 from app.database import init_db
-from app.routers import csv_upload, accounts, categories, analytics
+from app.routers import csv_upload, accounts, categories, analytics, ml_predict
 
 
 @asynccontextmanager
@@ -43,6 +43,7 @@ app.include_router(csv_upload.router)
 app.include_router(accounts.router)
 app.include_router(categories.router)
 app.include_router(analytics.router)
+app.include_router(ml_predict.router)
 
 # Mount static files — both index.html and analytics.html live in app/static/
 static_dir = Path(__file__).parent / "static"

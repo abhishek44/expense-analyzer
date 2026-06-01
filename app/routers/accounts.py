@@ -119,12 +119,12 @@ async def get_accounts(
     accounts_with_balances = []
     for account in accounts:
         # Get sum of credits and debits for this account
-        credit_sum = db.query(func.sum(Transaction.Credit)).filter(
-            Transaction.Account_name == account.name
+        credit_sum = db.query(func.sum(Transaction.credit)).filter(
+            Transaction.account_name == account.name
         ).scalar() or 0
         
-        debit_sum = db.query(func.sum(Transaction.Debit)).filter(
-            Transaction.Account_name == account.name
+        debit_sum = db.query(func.sum(Transaction.debit)).filter(
+            Transaction.account_name == account.name
         ).scalar() or 0
         
         balance = account.opening_balance + credit_sum - debit_sum
@@ -148,12 +148,12 @@ async def get_account(account_id: str, db: Session = Depends(get_db)) -> dict:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
     
     # Compute balance
-    credit_sum = db.query(func.sum(Transaction.Credit)).filter(
-        Transaction.Account_name == account.name
+    credit_sum = db.query(func.sum(Transaction.credit)).filter(
+        Transaction.account_name == account.name
     ).scalar() or 0
     
-    debit_sum = db.query(func.sum(Transaction.Debit)).filter(
-        Transaction.Account_name == account.name
+    debit_sum = db.query(func.sum(Transaction.debit)).filter(
+        Transaction.account_name == account.name
     ).scalar() or 0
     
     balance = account.opening_balance + credit_sum - debit_sum
@@ -296,12 +296,12 @@ async def update_account(
     db.refresh(account)
     
     # Compute balance
-    credit_sum = db.query(func.sum(Transaction.Credit)).filter(
-        Transaction.Account_name == account.name
+    credit_sum = db.query(func.sum(Transaction.credit)).filter(
+        Transaction.account_name == account.name
     ).scalar() or 0
     
-    debit_sum = db.query(func.sum(Transaction.Debit)).filter(
-        Transaction.Account_name == account.name
+    debit_sum = db.query(func.sum(Transaction.debit)).filter(
+        Transaction.account_name == account.name
     ).scalar() or 0
     
     balance = account.opening_balance + credit_sum - debit_sum

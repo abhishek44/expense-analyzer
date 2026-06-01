@@ -1,236 +1,162 @@
-"""Categories API router for managing transaction categories."""
+"""Categories API router — 2-level hierarchy."""
 
 import uuid
-from typing import List, Optional
+from typing import Optional
 from datetime import datetime
-from dateutil import parser as date_parser
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
-from sqlalchemy import or_
 
 from app.database import get_db
-from app.models import Category, Transaction
+from app.models import Category
 
 router = APIRouter(prefix="/api/categories", tags=["Categories"])
 
 
-# Request Models
 class CategoryCreate(BaseModel):
     name: str
-    type: str  # INCOME, EXPENSE
+    level: int = 1
     parent_id: Optional[str] = None
-    description: Optional[str] = None
-    icon_id: Optional[str] = None
+    domain: Optional[str] = None
     color_hex: Optional[str] = None
 
 
 class CategoryUpdate(BaseModel):
     name: Optional[str] = None
-    type: Optional[str] = None
-    parent_id: Optional[str] = None
-    description: Optional[str] = None
-    icon_id: Optional[str] = None
     color_hex: Optional[str] = None
-    is_archived: Optional[bool] = None
+    is_archived: Optional[int] = None
 
 
-class CategoryBatchUpsert(BaseModel):
-    """Model for batch upserting categories from mobile sync."""
-    id: str  # UUID from mobile
-    name: str
-    type: str  # INCOME, EXPENSE
-    parent_id: Optional[str] = None
-    description: Optional[str] = None
-    icon_id: Optional[str] = None
-    color_hex: Optional[str] = None
-    is_archived: Optional[int] = 0
-    created_at: Optional[str] = None
-    updated_at: Optional[str] = None
-
-
-class CategoryResponse(BaseModel):
-    id: str
-    name: str
-    type: str
-    parent_id: Optional[str]
-    description: Optional[str]
-    icon_id: Optional[str]
-    color_hex: Optional[str]
-    is_archived: int
-    created_at: str
-    updated_at: str
-
-
-@router.get("", response_model=List[CategoryResponse])
+@router.get("", summary="Get all categories")
 async def get_categories(
-    type: Optional[str] = None, 
-    include_archived: bool = False,
-    since: Optional[str] = None,
-    db: Session = Depends(get_db)
-):
-    """List all categories. Use 'since' parameter for incremental sync."""
-    query = db.query(Category)
-    
-    if type:
-        query = query.filter(Category.type == type)
-    
-    if not include_archived:
-        query = query.filter(Category.is_archived == 0)
-    
-    # Filter by updated_at for incremental sync
-    if since:
-        try:
-            since_dt = date_parser.parse(since)
-            query = query.filter(Category.updated_at >= since_dt)
-        except (ValueError, TypeError):
-            pass  # Ignore invalid date format
-        
-    categories = query.order_by(Category.name).all()
+    level: Optional[int] = None,
+    domain: Optional[str] = None,
+    include_children: bool = True,
+    db: Session = Depends(get_db),
+) -> list:
+    """Return categories. If include_children=True, L1 entries include nested L2 children."""
+    query = db.query(Category).filter(Category.is_archived == 0)
+
+    if level:
+        query = query.filter(Category.level == level)
+    if domain:
+        query = query.filter(Category.domain == domain)
+
+    categories = query.order_by(Category.level, Category.name).all()
+
+    if include_children and not level:
+        l1_cats = [c for c in categories if c.level == 1]
+        l2_cats = [c for c in categories if c.level == 2]
+        l2_by_parent = {}
+        for c in l2_cats:
+            l2_by_parent.setdefault(c.parent_id, []).append(c.to_dict())
+
+        result = []
+        for c in l1_cats:
+            d = c.to_dict()
+            d["children"] = l2_by_parent.get(c.id, [])
+            result.append(d)
+        return result
+
     return [c.to_dict() for c in categories]
 
 
-@router.get("/{category_id}", response_model=CategoryResponse)
-async def get_category(category_id: str, db: Session = Depends(get_db)):
-    """Get single category."""
-    category = db.query(Category).filter(Category.id == category_id).first()
-    if not category:
+@router.get("/{category_id}", summary="Get single category")
+async def get_category(category_id: str, db: Session = Depends(get_db)) -> dict:
+    cat = db.query(Category).filter(Category.id == category_id).first()
+    if not cat:
         raise HTTPException(status_code=404, detail="Category not found")
-    return category.to_dict()
+    d = cat.to_dict()
+    if cat.level == 1:
+        children = db.query(Category).filter(Category.parent_id == cat.id, Category.is_archived == 0).all()
+        d["children"] = [c.to_dict() for c in children]
+    return d
 
 
-@router.post("", response_model=CategoryResponse, status_code=status.HTTP_201_CREATED)
-async def create_category(data: CategoryCreate, db: Session = Depends(get_db)):
-    """Create a new category."""
+@router.post("", summary="Create category", status_code=201)
+async def create_category(data: CategoryCreate, db: Session = Depends(get_db)) -> dict:
+    if data.level == 2 and not data.parent_id:
+        raise HTTPException(status_code=400, detail="L2 category requires a parent_id")
+
     if data.parent_id:
         parent = db.query(Category).filter(Category.id == data.parent_id).first()
         if not parent:
             raise HTTPException(status_code=400, detail="Parent category not found")
+        if parent.level != 1:
+            raise HTTPException(status_code=400, detail="Parent must be an L1 category")
 
-    category = Category(
+    # Check uniqueness
+    existing = db.query(Category).filter(Category.name == data.name, Category.parent_id == data.parent_id).first()
+    if existing:
+        raise HTTPException(status_code=409, detail=f"Category '{data.name}' already exists under this parent")
+
+    now = datetime.now()
+    cat = Category(
         id=str(uuid.uuid4()),
         name=data.name,
-        type=data.type,
+        level=data.level,
         parent_id=data.parent_id,
-        description=data.description,
-        icon_id=data.icon_id,
-        color_hex=data.color_hex
+        domain=data.domain,
+        color_hex=data.color_hex,
+        created_at=now,
+        updated_at=now,
     )
-    
-    db.add(category)
+    db.add(cat)
     db.commit()
-    db.refresh(category)
-    return category.to_dict()
+    db.refresh(cat)
+    return cat.to_dict()
 
 
-@router.post("/batch", response_model=List[CategoryResponse])
-async def upsert_categories(
-    categories: List[CategoryBatchUpsert],
-    db: Session = Depends(get_db)
-):
-    """Batch upsert categories for sync. Updates existing or inserts new."""
-    results = []
-    
-    for cat_data in categories:
-        existing = db.query(Category).filter(Category.id == cat_data.id).first()
-        
+@router.post("/batch", summary="Batch create categories", status_code=201)
+async def batch_create_categories(categories: list[CategoryCreate], db: Session = Depends(get_db)) -> dict:
+    created = []
+    now = datetime.now()
+    for data in categories:
+        existing = db.query(Category).filter(Category.name == data.name, Category.parent_id == data.parent_id).first()
         if existing:
-            # Update if mobile version is newer
-            mobile_updated = None
-            if cat_data.updated_at:
-                try:
-                    mobile_updated = date_parser.parse(cat_data.updated_at)
-                except (ValueError, TypeError):
-                    mobile_updated = None
-            
-            # Update if mobile has newer timestamp or no timestamp comparison possible
-            if mobile_updated is None or existing.updated_at is None or mobile_updated > existing.updated_at:
-                existing.name = cat_data.name
-                existing.type = cat_data.type
-                existing.parent_id = cat_data.parent_id
-                existing.description = cat_data.description
-                existing.icon_id = cat_data.icon_id
-                existing.color_hex = cat_data.color_hex
-                existing.is_archived = cat_data.is_archived or 0
-                existing.updated_at = datetime.now()
-            results.append(existing)
-        else:
-            # Insert new
-            now = datetime.now()
-            category = Category(
-                id=cat_data.id,
-                name=cat_data.name,
-                type=cat_data.type,
-                parent_id=cat_data.parent_id,
-                description=cat_data.description,
-                icon_id=cat_data.icon_id,
-                color_hex=cat_data.color_hex,
-                is_archived=cat_data.is_archived or 0,
-                created_at=now,
-                updated_at=now
-            )
-            db.add(category)
-            results.append(category)
-    
+            continue
+        cat = Category(
+            id=str(uuid.uuid4()),
+            name=data.name,
+            level=data.level,
+            parent_id=data.parent_id,
+            domain=data.domain,
+            color_hex=data.color_hex,
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(cat)
+        created.append(data.name)
     db.commit()
-    for cat in results:
-        db.refresh(cat)
-    
-    return [c.to_dict() for c in results]
+    return {"success": True, "created": len(created)}
 
 
-@router.patch("/{category_id}", response_model=CategoryResponse)
-async def update_category(
-    category_id: str, 
-    data: CategoryUpdate, 
-    db: Session = Depends(get_db)
-):
-    """Update a category."""
-    category = db.query(Category).filter(Category.id == category_id).first()
-    if not category:
+@router.patch("/{category_id}", summary="Update category")
+async def update_category(category_id: str, data: CategoryUpdate, db: Session = Depends(get_db)) -> dict:
+    cat = db.query(Category).filter(Category.id == category_id).first()
+    if not cat:
         raise HTTPException(status_code=404, detail="Category not found")
-    
+
     update_dict = data.model_dump(exclude_unset=True)
-    
-    if "parent_id" in update_dict and update_dict["parent_id"]:
-        if update_dict["parent_id"] == category_id:
-            raise HTTPException(status_code=400, detail="Category cannot be its own parent")
-        parent = db.query(Category).filter(Category.id == update_dict["parent_id"]).first()
-        if not parent:
-            raise HTTPException(status_code=400, detail="Parent category not found")
-
-    if "is_archived" in update_dict:
-        update_dict["is_archived"] = 1 if update_dict["is_archived"] else 0
-
     for field, value in update_dict.items():
-        setattr(category, field, value)
-    
-    category.updated_at = datetime.now()
+        setattr(cat, field, value)
+    cat.updated_at = datetime.now()
+
     db.commit()
-    db.refresh(category)
-    return category.to_dict()
+    db.refresh(cat)
+    return cat.to_dict()
 
 
-@router.delete("/{category_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{category_id}", summary="Delete category", status_code=204)
 async def delete_category(category_id: str, db: Session = Depends(get_db)):
-    """Delete a category (hard delete if no dependencies, otherwise soft delete)."""
-    category = db.query(Category).filter(Category.id == category_id).first()
-    if not category:
+    cat = db.query(Category).filter(Category.id == category_id).first()
+    if not cat:
         raise HTTPException(status_code=404, detail="Category not found")
-    
-    # Check if used in transactions
-    usage_count = db.query(Transaction).filter(Transaction.category_id == category_id).count()
-    children_count = db.query(Category).filter(Category.parent_id == category_id).count()
-    
-    if usage_count > 0 or children_count > 0:
-        # Soft delete
-        category.is_archived = 1
-        category.updated_at = datetime.now()
-        db.commit()
-    else:
-        # Hard delete
-        db.delete(category)
-        db.commit()
-    
-    return None
+
+    # If L1, also delete children
+    if cat.level == 1:
+        db.query(Category).filter(Category.parent_id == cat.id).delete()
+
+    db.delete(cat)
+    db.commit()

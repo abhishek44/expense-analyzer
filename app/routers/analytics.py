@@ -1,4 +1,4 @@
-"""Analytics API router with aggregation endpoints for dashboard charts."""
+"""Analytics API router — uses parsed_date and new schema columns."""
 
 from datetime import datetime
 from typing import Optional
@@ -6,24 +6,11 @@ from collections import defaultdict
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import func, case, extract
 
 from app.database import get_db
-from app.models import Transaction
+from app.models import Transaction, Category
 
 router = APIRouter(prefix="/api/analytics", tags=["Analytics"])
-
-
-def parse_date(date_str: str) -> Optional[datetime]:
-    """Parse date string in multiple formats."""
-    if not date_str:
-        return None
-    for fmt in ["%d-%m-%Y", "%Y-%m-%d", "%d/%m/%Y", "%d/%m/%y"]:
-        try:
-            return datetime.strptime(date_str.strip(), fmt)
-        except ValueError:
-            continue
-    return None
 
 
 @router.get("/spending-overview", summary="Monthly spending overview")
@@ -31,42 +18,32 @@ async def spending_overview(
     year: Optional[int] = None,
     db: Session = Depends(get_db),
 ) -> dict:
-    """Monthly debit/credit totals and daily amounts for heatmap."""
-    transactions = db.query(
-        Transaction.Date,
-        Transaction.Debit,
-        Transaction.Credit,
-    ).all()
+    """Monthly debit/credit totals using parsed_date."""
+    query = db.query(
+        Transaction.parsed_date,
+        Transaction.debit,
+        Transaction.credit,
+    ).filter(Transaction.parsed_date.isnot(None))
+
+    if year:
+        query = query.filter(Transaction.parsed_date.like(f"{year}-%"))
+
+    transactions = query.all()
 
     monthly = defaultdict(lambda: {"total_debit": 0, "total_credit": 0})
     daily = defaultdict(float)
 
     for t in transactions:
-        dt = parse_date(t.Date)
-        if not dt:
-            continue
-        if year and dt.year != year:
-            continue
-
-        month_key = dt.strftime("%Y-%m")
-        debit = t.Debit or 0
-        credit = t.Credit or 0
+        month_key = t.parsed_date[:7]  # YYYY-MM
+        debit = t.debit or 0
+        credit = t.credit or 0
         monthly[month_key]["total_debit"] += debit
         monthly[month_key]["total_credit"] += credit
-
-        day_key = dt.strftime("%Y-%m-%d")
-        daily[day_key] += debit  # heatmap shows spending (debits)
+        daily[t.parsed_date] += debit
 
     monthly_list = sorted(
-        [
-            {
-                "month": k,
-                "total_debit": round(v["total_debit"], 2),
-                "total_credit": round(v["total_credit"], 2),
-                "net": round(v["total_credit"] - v["total_debit"], 2),
-            }
-            for k, v in monthly.items()
-        ],
+        [{"month": k, "total_debit": round(v["total_debit"], 2), "total_credit": round(v["total_credit"], 2),
+          "net": round(v["total_credit"] - v["total_debit"], 2)} for k, v in monthly.items()],
         key=lambda x: x["month"],
     )
 
@@ -89,159 +66,119 @@ async def spending_overview(
 
 @router.get("/category-breakdown", summary="Category spending breakdown")
 async def category_breakdown(
-    months: int = Query(6, ge=1, le=24, description="Months back to include"),
-    year: Optional[int] = Query(None, description="Filter to specific year"),
-    month: Optional[int] = Query(None, ge=1, le=12, description="Filter to specific month (requires year)"),
+    months: int = Query(6, ge=1, le=24),
+    year: Optional[int] = Query(None),
+    month: Optional[int] = Query(None, ge=1, le=12),
     db: Session = Depends(get_db),
 ) -> dict:
-    """Per-category spend totals and monthly trends.
+    """Per-L1-category spending totals."""
+    query = db.query(Transaction).filter(
+        Transaction.debit.isnot(None),
+        Transaction.debit > 0,
+        Transaction.parsed_date.isnot(None),
+    )
 
-    Supports three modes:
-    - year + month: Show data for a single month
-    - year only: Show data for the whole year
-    - neither: Show last N months (default 6)
-    """
-    transactions = db.query(
-        Transaction.Date,
-        Transaction.Debit,
-        Transaction.Category,
-    ).filter(Transaction.Debit.isnot(None), Transaction.Debit > 0).all()
-
-    # Determine filter mode
-    use_specific_period = year is not None
-
-    now = datetime.now()
-    if not use_specific_period:
+    if year and month:
+        prefix = f"{year}-{month:02d}"
+        query = query.filter(Transaction.parsed_date.like(f"{prefix}%"))
+        period_label = f"{datetime(year, month, 1).strftime('%b')} {year}"
+    elif year:
+        query = query.filter(Transaction.parsed_date.like(f"{year}-%"))
+        period_label = str(year)
+    else:
+        now = datetime.now()
         cutoff_month = now.month - months
         cutoff_year = now.year
         while cutoff_month <= 0:
             cutoff_month += 12
             cutoff_year -= 1
+        cutoff_date = f"{cutoff_year}-{cutoff_month:02d}-01"
+        query = query.filter(Transaction.parsed_date >= cutoff_date)
+        period_label = f"Last {months} months"
+
+    transactions = query.all()
+
+    # Build L1 category name lookup
+    l1_cats = {c.id: c.name for c in db.query(Category).filter(Category.level == 1).all()}
 
     category_totals = defaultdict(float)
     monthly_categories = defaultdict(lambda: defaultdict(float))
     grand_total = 0
-    period_label = ""
 
     for t in transactions:
-        dt = parse_date(t.Date)
-        if not dt:
-            continue
-
-        # Apply filtering
-        if use_specific_period:
-            if dt.year != year:
-                continue
-            if month is not None and dt.month != month:
-                continue
-        else:
-            if (dt.year, dt.month) < (cutoff_year, cutoff_month):
-                continue
-
-        cat = t.Category or "Uncategorized"
-        amount = t.Debit or 0
-        category_totals[cat] += amount
+        cat_name = l1_cats.get(t.l1_category_id, "Uncategorized")
+        amount = t.debit or 0
+        category_totals[cat_name] += amount
         grand_total += amount
-
-        month_key = dt.strftime("%Y-%m")
-        monthly_categories[month_key][cat] += amount
-
-    # Build period label
-    if use_specific_period:
-        if month is not None:
-            month_names = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-            period_label = f"{month_names[month - 1]} {year}"
-        else:
-            period_label = str(year)
-    else:
-        period_label = f"Last {months} months"
+        month_key = t.parsed_date[:7]
+        monthly_categories[month_key][cat_name] += amount
 
     categories_list = sorted(
-        [
-            {
-                "name": k,
-                "total": round(v, 2),
-                "percentage": round((v / grand_total * 100) if grand_total > 0 else 0, 1),
-            }
-            for k, v in category_totals.items()
-        ],
+        [{"name": k, "total": round(v, 2),
+          "percentage": round((v / grand_total * 100) if grand_total > 0 else 0, 1)}
+         for k, v in category_totals.items()],
         key=lambda x: x["total"],
         reverse=True,
     )
 
     monthly_list = sorted(
-        [
-            {
-                "month": m,
-                "categories": [
-                    {"name": cat, "total": round(amt, 2)}
-                    for cat, amt in sorted(cats.items(), key=lambda x: x[1], reverse=True)
-                ],
-            }
-            for m, cats in monthly_categories.items()
-        ],
+        [{"month": m, "categories": [{"name": cat, "total": round(amt, 2)}
+          for cat, amt in sorted(cats.items(), key=lambda x: x[1], reverse=True)]}
+         for m, cats in monthly_categories.items()],
         key=lambda x: x["month"],
     )
 
-    # Collect available years for the filter UI
-    all_years = set()
-    for t in transactions:
-        dt = parse_date(t.Date)
-        if dt:
-            all_years.add(dt.year)
+    # Available years
+    all_dates = db.query(Transaction.parsed_date).filter(Transaction.parsed_date.isnot(None)).distinct().all()
+    all_years = sorted(set(d[0][:4] for d in all_dates if d[0]), reverse=True)
 
     return {
         "grand_total": round(grand_total, 2),
         "categories": categories_list,
         "monthly": monthly_list,
         "period_label": period_label,
-        "available_years": sorted(all_years, reverse=True),
+        "available_years": [int(y) for y in all_years],
     }
 
 
 @router.get("/category-transactions", summary="Transactions for a category")
 async def category_transactions(
-    category: str = Query(..., description="Category name"),
-    year: Optional[int] = Query(None, description="Filter to specific year"),
-    month: Optional[int] = Query(None, ge=1, le=12, description="Filter to specific month"),
+    category: str = Query(..., description="L1 category name"),
+    year: Optional[int] = Query(None),
+    month: Optional[int] = Query(None, ge=1, le=12),
     db: Session = Depends(get_db),
 ) -> dict:
-    """Get all transactions for a given category, optionally filtered by year/month."""
+    """Get all transactions for a given L1 category name."""
+    # Find category ID by name
+    cat = db.query(Category).filter(Category.name == category, Category.level == 1).first()
+
     query = db.query(Transaction).filter(
-        Transaction.Debit.isnot(None),
-        Transaction.Debit > 0,
+        Transaction.debit.isnot(None),
+        Transaction.debit > 0,
     )
 
     if category == "Uncategorized":
-        query = query.filter(
-            (Transaction.Category.is_(None)) | (Transaction.Category == "")
-        )
+        query = query.filter(Transaction.l1_category_id.is_(None))
+    elif cat:
+        query = query.filter(Transaction.l1_category_id == cat.id)
     else:
-        query = query.filter(Transaction.Category == category)
+        return {"category": category, "count": 0, "total": 0, "transactions": []}
 
-    all_txns = query.all()
+    if year:
+        query = query.filter(Transaction.parsed_date.like(f"{year}-%"))
+    if month and year:
+        query = query.filter(Transaction.parsed_date.like(f"{year}-{month:02d}%"))
 
-    result = []
-    for t in all_txns:
-        dt = parse_date(t.Date)
-        if not dt:
-            continue
-        if year is not None and dt.year != year:
-            continue
-        if month is not None and dt.month != month:
-            continue
+    txns = query.order_by(Transaction.parsed_date.desc()).all()
 
-        result.append({
-            "id": t.Id,
-            "date": t.Date,
-            "details": (t.Details or "")[:120],
-            "debit": t.Debit or 0,
-            "account": t.Account_name,
-            "notes": t.Notes,
-        })
-
-    # Sort by date descending
-    result.sort(key=lambda x: parse_date(x["date"]) or datetime.min, reverse=True)
+    result = [{
+        "id": t.id,
+        "date": t.parsed_date or t.raw_date,
+        "details": (t.merchant_name or t.cleaned_details or t.raw_details or "")[:120],
+        "debit": t.debit or 0,
+        "account": t.account_name,
+        "notes": t.notes,
+    } for t in txns]
 
     return {
         "category": category,
@@ -252,16 +189,13 @@ async def category_transactions(
 
 
 @router.get("/account-analysis", summary="Account-level analysis")
-async def account_analysis(
-    db: Session = Depends(get_db),
-) -> dict:
-    """Per-account and per-type debit/credit aggregations."""
+async def account_analysis(db: Session = Depends(get_db)) -> dict:
     transactions = db.query(
-        Transaction.Date,
-        Transaction.Debit,
-        Transaction.Credit,
-        Transaction.Account_name,
-        Transaction.Account_type,
+        Transaction.parsed_date,
+        Transaction.debit,
+        Transaction.credit,
+        Transaction.account_name,
+        Transaction.account_type,
     ).all()
 
     by_account = defaultdict(lambda: {"total_debit": 0, "total_credit": 0, "count": 0})
@@ -269,11 +203,10 @@ async def account_analysis(
     monthly_accounts = defaultdict(lambda: defaultdict(lambda: {"debit": 0, "credit": 0}))
 
     for t in transactions:
-        dt = parse_date(t.Date)
-        acc = t.Account_name or "Unknown"
-        acc_type = t.Account_type or "Unknown"
-        debit = t.Debit or 0
-        credit = t.Credit or 0
+        acc = t.account_name or "Unknown"
+        acc_type = t.account_type or "Unknown"
+        debit = t.debit or 0
+        credit = t.credit or 0
 
         by_account[acc]["total_debit"] += debit
         by_account[acc]["total_credit"] += credit
@@ -283,138 +216,69 @@ async def account_analysis(
         by_type[acc_type]["total_credit"] += credit
         by_type[acc_type]["count"] += 1
 
-        if dt:
-            month_key = dt.strftime("%Y-%m")
+        if t.parsed_date:
+            month_key = t.parsed_date[:7]
             monthly_accounts[month_key][acc]["debit"] += debit
             monthly_accounts[month_key][acc]["credit"] += credit
 
     account_list = sorted(
-        [
-            {
-                "name": k,
-                "total_debit": round(v["total_debit"], 2),
-                "total_credit": round(v["total_credit"], 2),
-                "count": v["count"],
-            }
-            for k, v in by_account.items()
-        ],
-        key=lambda x: x["total_debit"],
-        reverse=True,
+        [{"name": k, "total_debit": round(v["total_debit"], 2), "total_credit": round(v["total_credit"], 2), "count": v["count"]}
+         for k, v in by_account.items()],
+        key=lambda x: x["total_debit"], reverse=True,
     )
-
     type_list = sorted(
-        [
-            {
-                "type": k,
-                "total_debit": round(v["total_debit"], 2),
-                "total_credit": round(v["total_credit"], 2),
-                "count": v["count"],
-            }
-            for k, v in by_type.items()
-        ],
-        key=lambda x: x["total_debit"],
-        reverse=True,
+        [{"type": k, "total_debit": round(v["total_debit"], 2), "total_credit": round(v["total_credit"], 2), "count": v["count"]}
+         for k, v in by_type.items()],
+        key=lambda x: x["total_debit"], reverse=True,
     )
-
     monthly_list = sorted(
-        [
-            {
-                "month": month,
-                "accounts": [
-                    {
-                        "name": acc,
-                        "debit": round(vals["debit"], 2),
-                        "credit": round(vals["credit"], 2),
-                    }
-                    for acc, vals in accs.items()
-                ],
-            }
-            for month, accs in monthly_accounts.items()
-        ],
+        [{"month": month, "accounts": [{"name": acc, "debit": round(vals["debit"], 2), "credit": round(vals["credit"], 2)}
+          for acc, vals in accs.items()]} for month, accs in monthly_accounts.items()],
         key=lambda x: x["month"],
     )
 
-    return {
-        "by_account": account_list,
-        "by_type": type_list,
-        "monthly": monthly_list,
-    }
+    return {"by_account": account_list, "by_type": type_list, "monthly": monthly_list}
 
 
 @router.get("/top-transactions", summary="Top merchants and largest transactions")
-async def top_transactions(
-    limit: int = Query(10, ge=1, le=50),
-    db: Session = Depends(get_db),
-) -> dict:
-    """Top merchants by frequency/amount, and largest individual transactions."""
+async def top_transactions(limit: int = Query(10, ge=1, le=50), db: Session = Depends(get_db)) -> dict:
     transactions = db.query(Transaction).all()
 
-    # Group by Details text to find top merchants
     merchant_stats = defaultdict(lambda: {"count": 0, "total": 0})
     all_txns = []
 
     for t in transactions:
-        detail = (t.Details or "Unknown").strip()
-        # Take first meaningful part of the detail for grouping
-        # UPI transactions often start with a pattern; simplify
-        short_name = detail.split("/")[0].strip() if "/" in detail else detail[:50]
-        if not short_name:
-            short_name = "Unknown"
-
-        debit = t.Debit or 0
-        credit = t.Credit or 0
+        display = t.merchant_name or t.cleaned_details or t.raw_details or "Unknown"
+        debit = t.debit or 0
+        credit = t.credit or 0
 
         if debit > 0:
-            merchant_stats[short_name]["count"] += 1
-            merchant_stats[short_name]["total"] += debit
+            merchant_stats[display]["count"] += 1
+            merchant_stats[display]["total"] += debit
 
+        l1_name = t.l1_category.name if t.l1_category else None
         all_txns.append({
-            "id": t.Id,
-            "date": t.Date,
-            "details": detail[:100],
+            "id": t.id,
+            "date": t.parsed_date or t.raw_date,
+            "details": display[:100],
             "debit": debit,
             "credit": credit,
-            "account": t.Account_name,
-            "category": t.Category,
+            "account": t.account_name,
+            "category": l1_name,
         })
 
     top_merchants = sorted(
-        [
-            {"name": k, "count": v["count"], "total": round(v["total"], 2)}
-            for k, v in merchant_stats.items()
-            if v["count"] > 0
-        ],
-        key=lambda x: x["total"],
-        reverse=True,
+        [{"name": k, "count": v["count"], "total": round(v["total"], 2)} for k, v in merchant_stats.items() if v["count"] > 0],
+        key=lambda x: x["total"], reverse=True,
     )[:limit]
 
-    largest_debits = sorted(
-        [t for t in all_txns if t["debit"] > 0],
-        key=lambda x: x["debit"],
-        reverse=True,
-    )[:limit]
+    largest_debits = sorted([t for t in all_txns if t["debit"] > 0], key=lambda x: x["debit"], reverse=True)[:limit]
+    largest_credits = sorted([t for t in all_txns if t["credit"] > 0], key=lambda x: x["credit"], reverse=True)[:limit]
 
-    largest_credits = sorted(
-        [t for t in all_txns if t["credit"] > 0],
-        key=lambda x: x["credit"],
-        reverse=True,
-    )[:limit]
-
-    # Recurring pattern detection (same merchant, 2+ occurrences)
     recurring = sorted(
-        [
-            {"name": k, "count": v["count"], "total": round(v["total"], 2),
-             "avg": round(v["total"] / v["count"], 2)}
-            for k, v in merchant_stats.items()
-            if v["count"] >= 3
-        ],
-        key=lambda x: x["count"],
-        reverse=True,
+        [{"name": k, "count": v["count"], "total": round(v["total"], 2), "avg": round(v["total"] / v["count"], 2)}
+         for k, v in merchant_stats.items() if v["count"] >= 3],
+        key=lambda x: x["count"], reverse=True,
     )[:limit]
 
-    return {
-        "top_merchants": top_merchants,
-        "largest_debits": largest_debits,
-        "largest_credits": largest_credits,
-        "recurring": recurring,
-    }
+    return {"top_merchants": top_merchants, "largest_debits": largest_debits, "largest_credits": largest_credits, "recurring": recurring}

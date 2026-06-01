@@ -10,7 +10,6 @@
     <link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect" />
     <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap"
         rel="stylesheet" />
-    <!-- Flatpickr date picker -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/themes/dark.css">
     <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap"
@@ -36,114 +35,16 @@
         }
     </script>
     <style>
-        body {
-            min-height: 100dvh;
-        }
-
-        .material-symbols-outlined {
-            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
-        }
-
-        .no-scrollbar::-webkit-scrollbar {
-            display: none;
-        }
-
-        .no-scrollbar {
-            -ms-overflow-style: none;
-            scrollbar-width: none;
-        }
-
-        /* Filter popover */
-        .filter-popover {
-            display: none;
-            animation: slideDown 0.2s ease-out;
-        }
-
-        .filter-popover.open {
-            display: block;
-        }
-
-        @keyframes slideDown {
-            from {
-                opacity: 0;
-                transform: translateY(-8px);
-            }
-
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
-        }
-
-        .filter-backdrop {
-            display: none;
-            position: fixed;
-            inset: 0;
-            z-index: 14;
-        }
-
-        .filter-backdrop.open {
-            display: block;
-        }
-
-        /* Flatpickr dark theme overrides */
-        .flatpickr-calendar {
-            z-index: 9999 !important;
-        }
-
-        .flatpickr-calendar.dark {
-            background: #1e293b;
-            border-color: #334155;
-            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4);
-            border-radius: 12px;
-        }
-
-        .flatpickr-calendar.dark .flatpickr-months .flatpickr-month,
-        .flatpickr-calendar.dark .flatpickr-weekdays,
-        .flatpickr-calendar.dark .flatpickr-weekday {
-            background: #1e293b;
-            color: #9dabb9;
-        }
-
-        .flatpickr-calendar.dark .flatpickr-day {
-            color: #e2e8f0;
-            border-radius: 8px;
-        }
-
-        .flatpickr-calendar.dark .flatpickr-day:hover {
-            background: #334155;
-            border-color: #334155;
-        }
-
-        .flatpickr-calendar.dark .flatpickr-day.selected {
-            background: #6c63ff;
-            border-color: #6c63ff;
-            color: #fff;
-        }
-
-        .flatpickr-calendar.dark .flatpickr-day.today {
-            border-color: #6c63ff;
-        }
-
-        .flatpickr-calendar.dark .flatpickr-months .flatpickr-prev-month,
-        .flatpickr-calendar.dark .flatpickr-months .flatpickr-next-month {
-            fill: #9dabb9;
-        }
-
-        .flatpickr-calendar.dark .flatpickr-months .flatpickr-prev-month:hover svg,
-        .flatpickr-calendar.dark .flatpickr-months .flatpickr-next-month:hover svg {
-            fill: #6c63ff;
-        }
-
-        .flatpickr-calendar.dark .flatpickr-current-month .flatpickr-monthDropdown-months,
-        .flatpickr-calendar.dark .flatpickr-current-month input.cur-year {
-            color: #e2e8f0;
-            font-weight: 600;
-        }
-
-        .flatpickr-calendar.dark .flatpickr-day.flatpickr-disabled {
-            color: #475569;
-        }
+        body { min-height: 100dvh; }
+        .material-symbols-outlined { font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24; }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        .filter-popover { display: none; animation: slideDown 0.2s ease-out; }
+        .filter-popover.open { display: block; }
+        @keyframes slideDown { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }
+        .filter-backdrop { display: none; position: fixed; inset: 0; z-index: 14; }
+        .filter-backdrop.open { display: block; }
+        .flatpickr-calendar { z-index: 9999 !important; }
     </style>
     <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
 </head>
@@ -153,24 +54,15 @@
 
     <script>
         const API_BASE = '/api';
-
-        // State
         let selectedFile = null;
         const PAGE_SIZE = 100;
         const appState = {
-            filters: {
-                status: '',
-                accountName: '',
-                accountType: '',
-                categoryId: '',
-                dateFrom: '',
-                dateTo: ''
-            },
+            filters: { status: '', accountName: '', accountType: '', l1CategoryId: '', dateFrom: '', dateTo: '' },
             currentRequestToken: 0,
-            // Pagination state
             loadedTransactions: [],
             totalTransactions: 0,
-            currentSkip: 0
+            currentSkip: 0,
+            categories: [],  // cached [{id, name, level, parent_id, domain, children: [...]}]
         };
 
         const api = {
@@ -181,121 +73,59 @@
                 const res = await fetch(`${API_BASE}/upload-csv`, { method: 'POST', body: formData });
                 return res.json();
             },
-            async getTransactions(status = null, filename = null, accountName = null, accountType = null, categoryId = null, skip = 0, limit = PAGE_SIZE, dateFrom = null, dateTo = null) {
-                let url = `${API_BASE}/transactions?skip=${skip}&limit=${limit}`;
+            async getTransactions(status, filename, accountName, accountType, l1CategoryId, skip, limit, dateFrom, dateTo) {
+                let url = `${API_BASE}/transactions?skip=${skip || 0}&limit=${limit || PAGE_SIZE}`;
                 if (status) url += `&status_filter=${status}`;
                 if (filename) url += `&filename_filter=${encodeURIComponent(filename)}`;
                 if (accountName) url += `&account_name=${encodeURIComponent(accountName)}`;
                 if (accountType) url += `&account_type=${encodeURIComponent(accountType)}`;
-                if (categoryId) url += `&category_id=${encodeURIComponent(categoryId)}`;
+                if (l1CategoryId) url += `&l1_category_id=${encodeURIComponent(l1CategoryId)}`;
                 if (dateFrom) url += `&date_from=${encodeURIComponent(dateFrom)}`;
                 if (dateTo) url += `&date_to=${encodeURIComponent(dateTo)}`;
                 const res = await fetch(url);
                 return res.json();
             },
-            async getTransaction(id) {
-                const res = await fetch(`${API_BASE}/transactions/${id}`);
-                return res.json();
+            async getTransaction(id) { return (await fetch(`${API_BASE}/transactions/${id}`)).json(); },
+            async reviewTransaction(id, data) {
+                return (await fetch(`${API_BASE}/transactions/${id}/review`, {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data)
+                })).json();
             },
-            async reviewTransaction(id, reviewData) {
-                const res = await fetch(`${API_BASE}/transactions/${id}/review`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(reviewData)
-                });
-                return res.json();
-            },
-            async deleteTransaction(id) {
-                const res = await fetch(`${API_BASE}/transactions/${id}`, { method: 'DELETE' });
-                return res.json();
-            },
-            async getFilterOptions() {
-                const res = await fetch(`${API_BASE}/filter-options`);
-                return res.json();
-            },
-            async getTables() {
-                const res = await fetch(`${API_BASE}/tables`);
-                return res.json();
-            },
-            async getUploadedFiles() {
-                const res = await fetch(`${API_BASE}/uploaded-files`);
-                return res.json();
-            },
-            async deleteFile(filename) {
-                const res = await fetch(`${API_BASE}/uploaded-files/${encodeURIComponent(filename)}`, { method: 'DELETE' });
-                return res.json();
-            },
-            async clearTable(tableName) {
-                const res = await fetch(`${API_BASE}/tables/${tableName}/clear`, { method: 'DELETE' });
-                return res.json();
-            },
+            async deleteTransaction(id) { return (await fetch(`${API_BASE}/transactions/${id}`, { method: 'DELETE' })).json(); },
+            async getFilterOptions() { return (await fetch(`${API_BASE}/filter-options`)).json(); },
+            async getTables() { return (await fetch(`${API_BASE}/tables`)).json(); },
+            async getUploadedFiles() { return (await fetch(`${API_BASE}/uploaded-files`)).json(); },
+            async deleteFile(filename) { return (await fetch(`${API_BASE}/uploaded-files/${encodeURIComponent(filename)}`, { method: 'DELETE' })).json(); },
+            async clearTable(name) { return (await fetch(`${API_BASE}/tables/${name}/clear`, { method: 'DELETE' })).json(); },
             async createTransaction(data) {
-                const res = await fetch(`${API_BASE}/transactions`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(data)
-                });
-                return res.json();
+                return (await fetch(`${API_BASE}/transactions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) })).json();
             },
-            // Accounts API
-            async getAccounts() {
-                const res = await fetch(`${API_BASE}/accounts`);
-                return res.json();
-            },
-            async createAccount(data) {
-                const res = await fetch(`${API_BASE}/accounts`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(data)
-                });
-                return res.json();
-            },
-            async updateAccount(id, data) {
-                const res = await fetch(`${API_BASE}/accounts/${id}`, {
-                    method: 'PATCH',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(data)
-                });
-                return res.json();
-            },
-            async deleteAccount(id) {
-                const res = await fetch(`${API_BASE}/accounts/${id}`, { method: 'DELETE' });
-                return res.json();
-            },
-            async getAccountTypes() {
-                const res = await fetch(`${API_BASE}/account-types`);
-                return res.json();
-            },
-            // Categories API
-            async getCategories(type = null) {
-                let url = `${API_BASE}/categories`;
-                if (type) url += `?type=${type}`;
-                const res = await fetch(url);
-                return res.json();
-            },
-            async createCategory(data) {
-                const res = await fetch(`${API_BASE}/categories`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(data)
-                });
-                return res.json();
-            },
-            async deleteCategory(id) {
-                const res = await fetch(`${API_BASE}/categories/${id}`, { method: 'DELETE' });
-                if (res.status === 204) return { success: true };
-                return res.json();
-            }
+            async getAccounts() { return (await fetch(`${API_BASE}/accounts`)).json(); },
+            async createAccount(data) { return (await fetch(`${API_BASE}/accounts`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) })).json(); },
+            async updateAccount(id, data) { return (await fetch(`${API_BASE}/accounts/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) })).json(); },
+            async deleteAccount(id) { return (await fetch(`${API_BASE}/accounts/${id}`, { method: 'DELETE' })).json(); },
+            async getCategories() { return (await fetch(`${API_BASE}/categories`)).json(); },
+            async createCategory(data) { return (await fetch(`${API_BASE}/categories`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) })).json(); },
+            async updateCategory(id, data) { return (await fetch(`${API_BASE}/categories/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) })).json(); },
+            async deleteCategory(id) { const r = await fetch(`${API_BASE}/categories/${id}`, { method: 'DELETE' }); return r.status === 204 ? { success: true } : r.json(); },
+            async getMerchantSuggestion(id) { return (await fetch(`${API_BASE}/merchant-suggestion/${id}`)).json(); },
         };
 
+        // Load categories once on startup
+        async function loadCategories() {
+            try { appState.categories = await api.getCategories(); } catch (e) { console.error(e); }
+        }
+        loadCategories();
+
+        function getL1Categories() { return appState.categories; }
+        function getL2Children(l1Id) {
+            const cat = appState.categories.find(c => c.id === l1Id);
+            return cat ? (cat.children || []) : [];
+        }
+
         const router = {
-            currentRoute: 'home',
-            params: {},
-            navigate(route, params = {}) {
-                this.currentRoute = route;
-                this.params = params;
-                this.render();
-            },
+            currentRoute: 'home', params: {},
+            navigate(route, params = {}) { this.currentRoute = route; this.params = params; this.render(); },
             render() {
                 const app = document.getElementById('app');
                 switch (this.currentRoute) {
@@ -307,8 +137,7 @@
                     case 'addExpense': app.innerHTML = screens.addExpense(); screens.initAddExpense(); break;
                     case 'settings': app.innerHTML = screens.settings(); screens.initSettings(); break;
                     case 'accounts': app.innerHTML = screens.accounts(); screens.initAccounts(); break;
-                    case 'categories': app.innerHTML = screens.categories(); screens.initCategories(); break;
-                    case 'addCategory': app.innerHTML = screens.addCategory(); screens.initAddCategory(); break;
+                    case 'categories': app.innerHTML = screens.categoriesScreen(); screens.initCategories(); break;
                 }
             }
         };
@@ -319,14 +148,7 @@
                     <button onclick="router.navigate('${route}')" class="flex flex-col items-center p-2 ${active === route ? 'text-primary' : 'text-text-secondary hover:text-primary'}">
                         <span class="material-symbols-outlined">${icon}</span>
                         <span class="text-xs mt-1">${label}</span>
-                    </button>
-                `;
-                const analyticsItem = `
-                    <a href="/analytics" class="flex flex-col items-center p-2 text-text-secondary hover:text-primary">
-                        <span class="material-symbols-outlined">insights</span>
-                        <span class="text-xs mt-1">Analytics</span>
-                    </a>
-                `;
+                    </button>`;
                 return `
                 <nav class="fixed bottom-0 left-0 right-0 bg-surface-dark border-t border-border-dark z-50">
                     <div class="flex justify-around py-2">
@@ -334,141 +156,100 @@
                         ${navItem('files', 'folder', 'Files')}
                         ${navItem('accounts', 'account_balance', 'Accounts')}
                         ${navItem('categories', 'category', 'Categories')}
-                        ${analyticsItem}
+                        <a href="/analytics" class="flex flex-col items-center p-2 text-text-secondary hover:text-primary">
+                            <span class="material-symbols-outlined">insights</span><span class="text-xs mt-1">Analytics</span>
+                        </a>
                         ${navItem('settings', 'settings', 'Settings')}
                     </div>
                 </nav>`;
             },
 
-            // Home Dashboard
+            // ─── Home ─────────────────────────────────────────────────────────
             home() {
                 return `
                 <div class="flex flex-col min-h-screen pb-16">
-                    <header class="flex items-center justify-between p-4 border-b border-gray-200 dark:border-border-dark">
+                    <header class="flex items-center justify-between p-4 border-b border-border-dark">
                         <h1 class="text-xl font-bold">Expense Tracker</h1>
+                        <button onclick="screens.exportReviewed()" class="flex items-center gap-1.5 h-9 px-3 rounded-lg bg-green-600 hover:bg-green-700 text-white text-sm font-semibold">
+                            <span class="material-symbols-outlined text-lg">download</span><span>Export</span>
+                        </button>
                     </header>
                     <main class="flex-1 p-4 space-y-4">
-                        <h2 class="text-lg font-bold">Dashboard</h2>
                         <div id="statsGrid" class="grid grid-cols-2 gap-3">
-                            <div class="bg-white dark:bg-surface-dark p-4 rounded-xl">
-                                <p class="text-text-secondary text-sm">Pending</p>
-                                <p id="statPending" class="text-2xl font-bold text-yellow-500">-</p>
-                            </div>
-                            <div class="bg-white dark:bg-surface-dark p-4 rounded-xl">
-                                <p class="text-text-secondary text-sm">Reviewed</p>
-                                <p id="statReviewed" class="text-2xl font-bold text-green-500">-</p>
-                            </div>
-                        </div>
-                        
-                        <div class="bg-white dark:bg-surface-dark p-4 rounded-xl">
-                            <h3 class="font-bold mb-2">Welcome to Expense Tracker</h3>
-                            <p class="text-text-secondary text-sm">Use the bottom tabs to navigate between sections.</p>
+                            <div class="bg-surface-dark p-4 rounded-xl"><p class="text-text-secondary text-sm">Pending</p><p id="statPending" class="text-2xl font-bold text-yellow-500">-</p></div>
+                            <div class="bg-surface-dark p-4 rounded-xl"><p class="text-text-secondary text-sm">Reviewed</p><p id="statReviewed" class="text-2xl font-bold text-green-500">-</p></div>
                         </div>
                     </main>
-                    
-                    <!-- Bottom Navigation -->
                     ${this.renderNav('home')}
                 </div>`;
             },
             async initHome() {
                 try {
                     const data = await api.getTables();
-                    const transactions = data.tables.find(t => t.name === 'transactions');
-                    if (transactions) {
-                        document.getElementById('statPending').textContent = transactions.pending || 0;
-                        document.getElementById('statReviewed').textContent = transactions.reviewed || 0;
-                    }
+                    const t = data.tables.find(t => t.name === 'transactions');
+                    if (t) { document.getElementById('statPending').textContent = t.pending || 0; document.getElementById('statReviewed').textContent = t.reviewed || 0; }
                 } catch (e) { console.error(e); }
             },
+            async exportReviewed() {
+                try {
+                    const res = await fetch(`${API_BASE}/export-transactions`);
+                    if (!res.ok) { alert((await res.json()).detail || 'Export failed'); return; }
+                    const blob = await res.blob();
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a'); a.href = url;
+                    a.download = res.headers.get('Content-Disposition')?.split('filename=')[1] || 'transactions.csv';
+                    document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+                } catch (e) { alert('Export failed: ' + e.message); }
+            },
 
-            // Upload Screen
+            // ─── Upload ───────────────────────────────────────────────────────
             upload() {
                 return `
                 <div class="flex flex-col min-h-screen">
-                    <header class="flex items-center p-4 border-b border-gray-200 dark:border-border-dark">
-                        <button onclick="router.navigate('home')" class="p-2 -ml-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700">
-                            <span class="material-symbols-outlined">arrow_back</span>
-                        </button>
+                    <header class="flex items-center p-4 border-b border-border-dark">
+                        <button onclick="router.navigate('home')" class="p-2 -ml-2 rounded-full hover:bg-gray-700"><span class="material-symbols-outlined">arrow_back</span></button>
                         <h1 class="text-lg font-bold ml-2">Upload CSV</h1>
                     </header>
                     <main class="flex-1 p-4 space-y-4">
-                        <div>
-                            <label class="block text-sm font-medium mb-2">Account Name/Number</label>
-                            <input id="accountName" type="text" placeholder="e.g. HDFC 1234" class="w-full h-12 px-4 rounded-lg border border-gray-300 dark:border-border-dark bg-white dark:bg-surface-dark" />
-                        </div>
-                        
-                        <div id="dropZone" class="flex flex-col items-center gap-4 rounded-xl border-2 border-dashed border-gray-300 dark:border-border-dark p-8 cursor-pointer hover:border-primary">
+                        <div><label class="block text-sm font-medium mb-2">Account Name</label><input id="accountName" type="text" placeholder="e.g. HDFC 1234" class="w-full h-12 px-4 rounded-lg border border-border-dark bg-surface-dark" /></div>
+                        <div id="dropZone" class="flex flex-col items-center gap-4 rounded-xl border-2 border-dashed border-border-dark p-8 cursor-pointer hover:border-primary">
                             <span class="material-symbols-outlined text-4xl text-primary">cloud_upload</span>
                             <p class="font-bold">Upload CSV File</p>
-                            <p class="text-sm text-text-secondary text-center">Tap to browse or drag file here</p>
+                            <p class="text-sm text-text-secondary">Tap to browse or drag file here</p>
                             <input type="file" id="fileInput" accept=".csv" class="hidden" />
                         </div>
-                        
-                        <div id="uploadProgress" class="hidden bg-white dark:bg-surface-dark p-4 rounded-xl">
-                            <div class="flex items-center gap-4">
-                                <div class="size-8 border-2 border-primary/30 border-t-primary rounded-full animate-spin"></div>
-                                <div>
-                                    <p class="font-bold">Uploading...</p>
-                                    <p id="uploadFileName" class="text-sm text-text-secondary"></p>
-                                </div>
-                            </div>
+                        <div id="uploadProgress" class="hidden bg-surface-dark p-4 rounded-xl">
+                            <div class="flex items-center gap-4"><div class="size-8 border-2 border-primary/30 border-t-primary rounded-full animate-spin"></div><div><p class="font-bold">Uploading...</p><p id="uploadFileName" class="text-sm text-text-secondary"></p></div></div>
                         </div>
                     </main>
                 </div>`;
             },
             initUpload() {
-                const dropZone = document.getElementById('dropZone');
-                const fileInput = document.getElementById('fileInput');
-
-                dropZone.onclick = () => fileInput.click();
-                dropZone.ondragover = (e) => { e.preventDefault(); dropZone.classList.add('border-primary'); };
-                dropZone.ondragleave = () => dropZone.classList.remove('border-primary');
-                dropZone.ondrop = (e) => { e.preventDefault(); dropZone.classList.remove('border-primary'); if (e.dataTransfer.files[0]) this.handleUpload(e.dataTransfer.files[0]); };
-                fileInput.onchange = (e) => { if (e.target.files[0]) this.handleUpload(e.target.files[0]); };
+                const dz = document.getElementById('dropZone'), fi = document.getElementById('fileInput');
+                dz.onclick = () => fi.click();
+                dz.ondragover = e => { e.preventDefault(); dz.classList.add('border-primary'); };
+                dz.ondragleave = () => dz.classList.remove('border-primary');
+                dz.ondrop = e => { e.preventDefault(); if (e.dataTransfer.files[0]) this.handleUpload(e.dataTransfer.files[0]); };
+                fi.onchange = e => { if (e.target.files[0]) this.handleUpload(e.target.files[0]); };
             },
             async handleUpload(file) {
-                const progress = document.getElementById('uploadProgress');
-                const dropZone = document.getElementById('dropZone');
-                const accountName = document.getElementById('accountName').value;
-
                 document.getElementById('uploadFileName').textContent = file.name;
-                dropZone.classList.add('hidden');
-                progress.classList.remove('hidden');
-
+                document.getElementById('dropZone').classList.add('hidden');
+                document.getElementById('uploadProgress').classList.remove('hidden');
                 try {
-                    const result = await api.uploadCSV(file, accountName);
-                    if (result.success) {
-                        alert(`Uploaded ${result.rows_inserted} rows successfully!`);
-                        router.navigate('files');
-                    } else {
-                        alert('Upload failed: ' + (result.detail || 'Unknown error'));
-                        dropZone.classList.remove('hidden');
-                        progress.classList.add('hidden');
-                    }
-                } catch (e) {
-                    alert('Upload failed: ' + e.message);
-                    dropZone.classList.remove('hidden');
-                    progress.classList.add('hidden');
-                }
+                    const result = await api.uploadCSV(file, document.getElementById('accountName').value);
+                    if (result.success) { alert(`Uploaded ${result.rows_inserted} rows`); router.navigate('files'); }
+                    else { alert('Failed: ' + (result.detail || 'Unknown')); document.getElementById('dropZone').classList.remove('hidden'); document.getElementById('uploadProgress').classList.add('hidden'); }
+                } catch (e) { alert('Failed: ' + e.message); document.getElementById('dropZone').classList.remove('hidden'); document.getElementById('uploadProgress').classList.add('hidden'); }
             },
 
-            // Files List Screen
+            // ─── Files ────────────────────────────────────────────────────────
             files() {
                 return `
                 <div class="flex flex-col min-h-screen pb-16">
-                    <header class="flex items-center p-4 border-b border-gray-200 dark:border-border-dark">
-                        <h1 class="text-lg font-bold">Uploaded Files</h1>
-                    </header>
-                    <main id="filesList" class="flex-1 p-4 space-y-3 pb-20">
-                        <div class="flex justify-center py-8"><div class="size-8 border-2 border-primary/30 border-t-primary rounded-full animate-spin"></div></div>
-                    </main>
-                    
-                    <!-- FAB -->
-                    <button onclick="router.navigate('addExpense')" class="fixed bottom-20 right-4 w-14 h-14 bg-primary text-white rounded-full shadow-lg flex items-center justify-center hover:bg-primary/90 z-10">
-                        <span class="material-symbols-outlined text-3xl">add</span>
-                    </button>
-                    
-                    <!-- Bottom Navigation -->
+                    <header class="flex items-center p-4 border-b border-border-dark"><h1 class="text-lg font-bold">Uploaded Files</h1></header>
+                    <main id="filesList" class="flex-1 p-4 space-y-3 pb-20"><div class="flex justify-center py-8"><div class="size-8 border-2 border-primary/30 border-t-primary rounded-full animate-spin"></div></div></main>
+                    <button onclick="router.navigate('addExpense')" class="fixed bottom-20 right-4 w-14 h-14 bg-primary text-white rounded-full shadow-lg flex items-center justify-center z-10"><span class="material-symbols-outlined text-3xl">add</span></button>
                     ${this.renderNav('files')}
                 </div>`;
             },
@@ -476,471 +257,111 @@
                 const list = document.getElementById('filesList');
                 try {
                     const data = await api.getUploadedFiles();
-                    if (data.files.length === 0) {
-                        list.innerHTML = '<p class="text-center text-text-secondary py-8">No files uploaded yet</p>';
-                        return;
-                    }
+                    if (!data.files.length) { list.innerHTML = '<p class="text-center text-text-secondary py-8">No files uploaded yet</p>'; return; }
                     list.innerHTML = data.files.map(f => `
-                        <div class="bg-white dark:bg-surface-dark p-4 rounded-xl">
+                        <div class="bg-surface-dark p-4 rounded-xl">
                             <div class="flex justify-between items-start mb-2">
-                                <div class="flex-1 min-w-0">
-                                    <p class="font-bold truncate">${f.filename}</p>
-                                </div>
-                                <button onclick="screens.deleteFile('${f.filename.replace(/'/g, "\\'")}')" class="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-full">
-                                    <span class="material-symbols-outlined">delete</span>
-                                </button>
+                                <p class="font-bold truncate flex-1">${f.filename}</p>
+                                <button onclick="screens.deleteFile('${f.filename.replace(/'/g, "\\'")}')" class="p-2 text-red-500 hover:bg-red-900/20 rounded-full"><span class="material-symbols-outlined">delete</span></button>
                             </div>
-                            <div class="flex items-center gap-4 text-sm">
-                                <span class="text-yellow-500">${f.pending_count} pending</span>
-                                <span class="text-green-500">${f.reviewed_count} reviewed</span>
-                            </div>
-                            <button onclick="selectedFile='${f.filename.replace(/'/g, "\\'")}'; appState.listScroll = 0; router.navigate('list')" class="mt-3 w-full h-10 bg-primary text-white font-bold rounded-lg">
-                                View Transactions
-                            </button>
-                        </div>
-                    `).join('');
-                } catch (e) {
-                    list.innerHTML = '<p class="text-center text-red-500 py-8">Failed to load files</p>';
-                }
+                            <div class="flex items-center gap-4 text-sm"><span class="text-yellow-500">${f.pending_count} pending</span><span class="text-green-500">${f.reviewed_count} reviewed</span></div>
+                            <button onclick="selectedFile='${f.filename.replace(/'/g, "\\'")}'; router.navigate('list')" class="mt-3 w-full h-10 bg-primary text-white font-bold rounded-lg">View Transactions</button>
+                        </div>`).join('');
+                } catch (e) { list.innerHTML = '<p class="text-center text-red-500 py-8">Failed to load</p>'; }
             },
             async deleteFile(filename) {
                 if (!confirm(`Delete all records for "${filename}"?`)) return;
-                try {
-                    const result = await api.deleteFile(filename);
-                    if (result.success) {
-                        alert(result.message);
-                        this.initFiles();
-                    } else {
-                        alert('Delete failed: ' + (result.detail || 'Unknown error'));
-                    }
-                } catch (e) { alert('Delete failed: ' + e.message); }
+                try { const r = await api.deleteFile(filename); if (r.success) { alert(r.message); this.initFiles(); } } catch (e) { alert(e.message); }
             },
 
-            // Transaction List Screen
+            // ─── Transaction List ─────────────────────────────────────────────
             list() {
-                const { status, accountName, accountType } = appState.filters;
+                const { status } = appState.filters;
                 return `
                 <div class="flex flex-col min-h-screen pb-16">
-                    <header class="sticky top-0 z-10 bg-background-light dark:bg-background-dark border-b border-gray-200 dark:border-border-dark relative">
+                    <header class="sticky top-0 z-10 bg-background-dark border-b border-border-dark">
                         <div class="flex items-center p-4">
-                            <button onclick="router.navigate('files')" class="p-2 -ml-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700">
-                                <span class="material-symbols-outlined">arrow_back</span>
-                            </button>
-                            <div class="ml-2 flex-1 min-w-0">
-                                <h1 class="text-lg font-bold truncate">${selectedFile || 'All Transactions'}</h1>
-                            </div>
+                            <button onclick="router.navigate('files')" class="p-2 -ml-2 rounded-full hover:bg-gray-700"><span class="material-symbols-outlined">arrow_back</span></button>
+                            <h1 class="text-lg font-bold ml-2 truncate flex-1">${selectedFile || 'All Transactions'}</h1>
                         </div>
-                        <div class="flex gap-2 px-4 pb-3 overflow-x-auto no-scrollbar items-center">
-                            <button data-filter="" class="filter-chip ${status === '' ? 'active bg-primary text-white' : 'bg-white dark:bg-surface-dark border border-gray-200 dark:border-gray-700'} shrink-0 h-8 px-4 rounded-full text-sm font-bold">All</button>
-                            <button data-filter="pending" class="filter-chip ${status === 'pending' ? 'active bg-primary text-white' : 'bg-white dark:bg-surface-dark border border-gray-200 dark:border-gray-700'} shrink-0 h-8 px-4 rounded-full text-sm">Pending</button>
-                            <button data-filter="reviewed" class="filter-chip ${status === 'reviewed' ? 'active bg-primary text-white' : 'bg-white dark:bg-surface-dark border border-gray-200 dark:border-gray-700'} shrink-0 h-8 px-4 rounded-full text-sm">Reviewed</button>
-                            <div class="ml-auto shrink-0">
-                                <button id="filterBarToggle" class="flex items-center gap-1.5 h-8 px-3 rounded-full text-sm border transition-colors ${(accountName || accountType || appState.filters.categoryId || appState.filters.dateFrom || appState.filters.dateTo) ? 'bg-primary/10 border-primary text-primary' : 'bg-white dark:bg-surface-dark border-gray-200 dark:border-gray-700 text-text-secondary hover:border-primary hover:text-primary'}">
-                                    <span class="material-symbols-outlined text-lg">tune</span>
-                                    <span>Filters</span>
-                                    ${(accountName || accountType || appState.filters.categoryId || appState.filters.dateFrom || appState.filters.dateTo) ? '<span class="w-5 h-5 rounded-full bg-primary text-white text-xs flex items-center justify-center font-bold">' + [accountName, accountType, appState.filters.categoryId, appState.filters.dateFrom, appState.filters.dateTo].filter(Boolean).length + '</span>' : ''}
-                                </button>
-                            </div>
-                        </div>
-
-                        <!-- Active filter tags -->
-                        <div id="activeFilterTags" class="px-4 pb-3 flex flex-wrap gap-2 ${(accountName || accountType || appState.filters.categoryId || appState.filters.dateFrom || appState.filters.dateTo) ? '' : 'hidden'}">
-                        </div>
-
-                        <!-- Filter popover backdrop -->
-                        <div id="filterBackdrop" class="filter-backdrop"></div>
-
-                        <!-- Filter popover panel -->
-                        <div id="filterPopover" class="filter-popover absolute left-0 right-0 z-15 mx-4 mt-1 p-4 rounded-xl bg-white dark:bg-surface-dark border border-gray-200 dark:border-border-dark shadow-xl" style="z-index: 15;">
-                            <div class="space-y-3">
-                                <div>
-                                    <label class="text-xs font-semibold text-text-secondary uppercase tracking-wider">Account</label>
-                                    <select id="filterAccountName" class="mt-1 w-full h-10 px-3 rounded-lg border border-gray-200 dark:border-border-dark bg-background-light dark:bg-background-dark text-sm focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-colors">
-                                        <option value="">All Accounts</option>
-                                    </select>
-                                </div>
-                                <div>
-                                    <label class="text-xs font-semibold text-text-secondary uppercase tracking-wider">Type</label>
-                                    <select id="filterAccountType" class="mt-1 w-full h-10 px-3 rounded-lg border border-gray-200 dark:border-border-dark bg-background-light dark:bg-background-dark text-sm focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-colors">
-                                        <option value="">All Types</option>
-                                    </select>
-                                </div>
-                                <div>
-                                    <label class="text-xs font-semibold text-text-secondary uppercase tracking-wider">Category</label>
-                                    <select id="filterCategory" class="mt-1 w-full h-10 px-3 rounded-lg border border-gray-200 dark:border-border-dark bg-background-light dark:bg-background-dark text-sm focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-colors">
-                                        <option value="">All Categories</option>
-                                    </select>
-                                </div>
-                                <div class="flex gap-2">
-                                    <div class="flex-1">
-                                        <label class="text-xs font-semibold text-text-secondary uppercase tracking-wider">From Date</label>
-                                        <input type="text" id="filterDateFrom" value="${appState.filters.dateFrom}" placeholder="Select date" readonly class="mt-1 w-full h-10 px-3 rounded-lg border border-gray-200 dark:border-border-dark bg-background-light dark:bg-background-dark text-sm focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-colors cursor-pointer" />
-                                    </div>
-                                    <div class="flex-1">
-                                        <label class="text-xs font-semibold text-text-secondary uppercase tracking-wider">To Date</label>
-                                        <input type="text" id="filterDateTo" value="${appState.filters.dateTo}" placeholder="Select date" readonly class="mt-1 w-full h-10 px-3 rounded-lg border border-gray-200 dark:border-border-dark bg-background-light dark:bg-background-dark text-sm focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-colors cursor-pointer" />
-                                    </div>
-                                </div>
-                                <div class="flex gap-2 pt-1">
-                                    <button id="filterClearBtn" class="flex-1 h-10 rounded-lg border border-gray-200 dark:border-border-dark text-sm font-semibold hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">Clear All</button>
-                                    <button id="filterApplyBtn" class="flex-1 h-10 rounded-lg bg-primary text-white text-sm font-semibold hover:bg-primary/90 transition-colors">Apply</button>
-                                </div>
-                            </div>
+                        <div class="flex gap-2 px-4 pb-3 overflow-x-auto no-scrollbar">
+                            <button data-filter="" class="filter-chip ${!status ? 'bg-primary text-white' : 'bg-surface-dark border border-gray-700'} shrink-0 h-8 px-4 rounded-full text-sm font-bold">All</button>
+                            <button data-filter="pending" class="filter-chip ${status === 'pending' ? 'bg-primary text-white' : 'bg-surface-dark border border-gray-700'} shrink-0 h-8 px-4 rounded-full text-sm">Pending</button>
+                            <button data-filter="approved" class="filter-chip ${status === 'approved' ? 'bg-primary text-white' : 'bg-surface-dark border border-gray-700'} shrink-0 h-8 px-4 rounded-full text-sm">Reviewed</button>
                         </div>
                     </header>
-                    <main id="statementsList" class="flex-1 p-4 space-y-3 pb-20">
-                        <div class="flex justify-center py-8"><div class="size-8 border-2 border-primary/30 border-t-primary rounded-full animate-spin"></div></div>
-                    </main>
-
-                    <!-- FAB -->
-                    <button onclick="router.navigate('addExpense')" class="fixed bottom-20 right-4 w-14 h-14 bg-primary text-white rounded-full shadow-lg flex items-center justify-center hover:bg-primary/90 z-20">
-                        <span class="material-symbols-outlined text-3xl">add</span>
-                    </button>
-
-                    <!-- Bottom Navigation -->
+                    <main id="statementsList" class="flex-1 p-4 space-y-3 pb-20"><div class="flex justify-center py-8"><div class="size-8 border-2 border-primary/30 border-t-primary rounded-full animate-spin"></div></div></main>
+                    <button onclick="router.navigate('addExpense')" class="fixed bottom-20 right-4 w-14 h-14 bg-primary text-white rounded-full shadow-lg flex items-center justify-center z-20"><span class="material-symbols-outlined text-3xl">add</span></button>
                     ${this.renderNav('list')}
                 </div>`;
             },
             async initList() {
-                try {
-                    const [options, categories] = await Promise.all([
-                        api.getFilterOptions(),
-                        api.getCategories()
-                    ]);
-
-                    // Store categories for tag label lookups
-                    appState._categories = categories;
-
-                    const nameSelect = document.getElementById('filterAccountName');
-                    while (nameSelect.options.length > 1) nameSelect.remove(1);
-                    options.account_names.forEach(name => {
-                        const opt = document.createElement('option');
-                        opt.value = name;
-                        opt.textContent = name;
-                        nameSelect.appendChild(opt);
-                    });
-
-                    const typeSelect = document.getElementById('filterAccountType');
-                    while (typeSelect.options.length > 1) typeSelect.remove(1);
-                    options.account_types.forEach(type => {
-                        const opt = document.createElement('option');
-                        opt.value = type;
-                        opt.textContent = type;
-                        typeSelect.appendChild(opt);
-                    });
-
-                    const catSelect = document.getElementById('filterCategory');
-                    while (catSelect.options.length > 1) catSelect.remove(1);
-                    categories.forEach(cat => {
-                        const opt = document.createElement('option');
-                        opt.value = cat.id;
-                        opt.textContent = cat.name;
-                        catSelect.appendChild(opt);
-                    });
-
-                    // Restore current filter values
-                    nameSelect.value = appState.filters.accountName || '';
-                    typeSelect.value = appState.filters.accountType || '';
-                    catSelect.value = appState.filters.categoryId || '';
-
-                    // Filter popover toggle
-                    const popover = document.getElementById('filterPopover');
-                    const backdrop = document.getElementById('filterBackdrop');
-                    const toggleBtn = document.getElementById('filterBarToggle');
-
-                    const openPopover = () => {
-                        popover.classList.add('open');
-                        backdrop.classList.add('open');
-                    };
-                    const closePopover = () => {
-                        popover.classList.remove('open');
-                        backdrop.classList.remove('open');
-                    };
-
-                    toggleBtn.onclick = () => {
-                        popover.classList.contains('open') ? closePopover() : openPopover();
-                    };
-                    backdrop.onclick = closePopover;
-
-                    // Apply button — initialize Flatpickr date pickers
-                    const fpConfig = {
-                        dateFormat: 'Y-m-d',
-                        altInput: true,
-                        altFormat: 'd M Y',
-                        allowInput: false,
-                        theme: 'dark',
-                        disableMobile: true,
-                    };
-
-                    const dateFromInput = document.getElementById('filterDateFrom');
-                    const dateToInput = document.getElementById('filterDateTo');
-
-                    const fromPicker = flatpickr(dateFromInput, {
-                        ...fpConfig,
-                        defaultDate: appState.filters.dateFrom || null,
-                        onChange: (selectedDates) => {
-                            if (selectedDates.length) toPicker.set('minDate', selectedDates[0]);
-                        },
-                    });
-
-                    const toPicker = flatpickr(dateToInput, {
-                        ...fpConfig,
-                        defaultDate: appState.filters.dateTo || null,
-                        onChange: (selectedDates) => {
-                            if (selectedDates.length) fromPicker.set('maxDate', selectedDates[0]);
-                        },
-                    });
-
-                    // Set initial constraints if dates already selected
-                    if (appState.filters.dateFrom) toPicker.set('minDate', appState.filters.dateFrom);
-                    if (appState.filters.dateTo) fromPicker.set('maxDate', appState.filters.dateTo);
-
-                    // Store pickers on appState so removeFilter can access them
-                    appState._datePickers = { fromPicker, toPicker };
-
-                    document.getElementById('filterApplyBtn').onclick = () => {
-                        const fromVal = dateFromInput.value;
-                        const toVal = dateToInput.value;
-
-                        // Date validation
-                        if (fromVal && toVal && fromVal > toVal) {
-                            alert('"From Date" cannot be after "To Date". Please correct the date range.');
-                            return;
-                        }
-
-                        appState.filters.accountName = nameSelect.value;
-                        appState.filters.accountType = typeSelect.value;
-                        appState.filters.categoryId = catSelect.value;
-                        appState.filters.dateFrom = fromVal;
-                        appState.filters.dateTo = toVal;
-                        appState.listScroll = 0;
-                        closePopover();
-                        this.renderFilterTags();
-                        this.loadStatements();
-                    };
-
-                    // Clear button
-                    document.getElementById('filterClearBtn').onclick = () => {
-                        nameSelect.value = '';
-                        typeSelect.value = '';
-                        catSelect.value = '';
-                        fromPicker.clear();
-                        toPicker.clear();
-                        fromPicker.set('maxDate', null);
-                        toPicker.set('minDate', null);
-                        appState.filters.accountName = '';
-                        appState.filters.accountType = '';
-                        appState.filters.categoryId = '';
-                        appState.filters.dateFrom = '';
-                        appState.filters.dateTo = '';
-                        appState.listScroll = 0;
-                        closePopover();
-                        this.renderFilterTags();
-                        this.loadStatements();
-                    };
-
-                    // Render initial tags
-                    this.renderFilterTags();
-                } catch (e) { console.error(e); }
-
                 document.querySelectorAll('.filter-chip').forEach(chip => {
                     chip.onclick = () => {
-                        document.querySelectorAll('.filter-chip').forEach(c => {
-                            c.classList.remove('active', 'bg-primary', 'text-white');
-                            c.classList.add('bg-white', 'dark:bg-surface-dark', 'border');
-                        });
-                        chip.classList.add('active', 'bg-primary', 'text-white');
-                        chip.classList.remove('bg-white', 'dark:bg-surface-dark', 'border');
-
+                        document.querySelectorAll('.filter-chip').forEach(c => { c.classList.remove('bg-primary', 'text-white'); c.classList.add('bg-surface-dark', 'border'); });
+                        chip.classList.add('bg-primary', 'text-white'); chip.classList.remove('bg-surface-dark', 'border');
                         appState.filters.status = chip.dataset.filter;
-                        appState.listScroll = 0;
                         this.loadStatements();
                     };
                 });
-
                 await this.loadStatements();
-                if (appState.listScroll) window.scrollTo(0, appState.listScroll);
             },
             async loadStatements(append = false) {
                 const list = document.getElementById('statementsList');
                 if (!list) return;
-
-                const { status, accountName, accountType, categoryId, dateFrom, dateTo } = appState.filters;
+                const { status, accountName, accountType, l1CategoryId, dateFrom, dateTo } = appState.filters;
                 const requestToken = ++appState.currentRequestToken;
 
-                if (!append) {
-                    // Fresh load: reset pagination state
-                    appState.loadedTransactions = [];
-                    appState.currentSkip = 0;
-                    list.innerHTML = '<div class="flex justify-center py-8"><div class="size-8 border-2 border-primary/30 border-t-primary rounded-full animate-spin"></div></div>';
-                } else {
-                    // Remove existing Load More button while loading
-                    const existingBtn = document.getElementById('loadMoreContainer');
-                    if (existingBtn) existingBtn.innerHTML = '<div class="flex justify-center py-4"><div class="size-6 border-2 border-primary/30 border-t-primary rounded-full animate-spin"></div></div>';
-                }
+                if (!append) { appState.loadedTransactions = []; appState.currentSkip = 0; list.innerHTML = '<div class="flex justify-center py-8"><div class="size-8 border-2 border-primary/30 border-t-primary rounded-full animate-spin"></div></div>'; }
 
                 try {
-                    const data = await api.getTransactions(status, selectedFile, accountName, accountType, categoryId, appState.currentSkip, PAGE_SIZE, dateFrom, dateTo);
-
-                    // Race condition check
+                    const data = await api.getTransactions(status, selectedFile, accountName, accountType, l1CategoryId, appState.currentSkip, PAGE_SIZE, dateFrom, dateTo);
                     if (requestToken !== appState.currentRequestToken) return;
 
                     appState.totalTransactions = data.total;
-                    appState.loadedTransactions = append
-                        ? [...appState.loadedTransactions, ...data.data]
-                        : data.data;
+                    appState.loadedTransactions = append ? [...appState.loadedTransactions, ...data.data] : data.data;
                     appState.currentSkip += data.data.length;
 
-                    if (appState.loadedTransactions.length === 0) {
-                        list.innerHTML = `
-                            <div class="text-center py-8">
-                                <p class="text-text-secondary mb-3">No transactions found</p>
-                                ${(status || accountName || accountType) ?
-                                `<button onclick="screens.clearFilters()" class="text-primary font-bold text-sm hover:underline">Clear Filters</button>`
-                                : ''}
-                            </div>`;
-                        return;
-                    }
+                    if (!appState.loadedTransactions.length) { list.innerHTML = '<p class="text-center text-text-secondary py-8">No transactions found</p>'; return; }
 
-                    const transactionCards = appState.loadedTransactions.map(t => `
-                        <div onclick="appState.listScroll = window.scrollY; router.navigate('details', {id: ${t.Id}})" class="bg-white dark:bg-surface-dark p-4 rounded-xl cursor-pointer hover:shadow-md transition-shadow">
+                    const cards = appState.loadedTransactions.map(t => {
+                        const name = t.merchant_name || t.cleaned_details || t.raw_details || 'Transaction';
+                        const subtitle = [t.flow_direction, t.account_name].filter(Boolean).join(' • ');
+                        const amtClass = t.debit ? 'text-red-500' : 'text-green-500';
+                        const amtStr = t.debit ? `- ₹${t.debit.toLocaleString()}` : t.credit ? `+ ₹${t.credit.toLocaleString()}` : '₹0';
+                        return `
+                        <div onclick="router.navigate('details', {id: ${t.id}})" class="bg-surface-dark p-4 rounded-xl cursor-pointer hover:shadow-md transition-shadow">
                             <div class="flex justify-between items-start">
                                 <div class="flex-1 min-w-0 mr-3">
-                                    <p class="font-bold truncate">${t.Details || 'Transaction'}</p>
-                                    <p class="text-sm ${t.Debit ? 'text-red-500' : 'text-green-500'}">
-                                        ${t.Debit ? `- ₹${t.Debit.toLocaleString()}` : t.Credit ? `+ ₹${t.Credit.toLocaleString()}` : '₹0'}
-                                    </p>
+                                    <p class="font-bold truncate capitalize">${name}</p>
+                                    ${subtitle ? `<p class="text-xs text-text-secondary truncate">${subtitle}</p>` : ''}
+                                    <p class="text-sm ${amtClass}">${amtStr}</p>
                                 </div>
                                 <div class="text-right shrink-0">
-                                    <span class="px-2 py-1 rounded text-xs font-bold ${t.review_status === 'reviewed' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' : 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400'}">${t.review_status}</span>
-                                    <p class="text-xs text-gray-400 mt-1">${t.Date || ''}</p>
+                                    <span class="px-2 py-1 rounded text-xs font-bold ${t.review_status !== 'pending' ? 'bg-green-900/30 text-green-400' : 'bg-yellow-900/30 text-yellow-400'}">${t.review_status}</span>
+                                    <p class="text-xs text-gray-400 mt-1">${t.parsed_date || t.raw_date || ''}</p>
                                 </div>
                             </div>
-                        </div>
-                    `).join('');
+                        </div>`;
+                    }).join('');
 
                     const hasMore = appState.loadedTransactions.length < appState.totalTransactions;
-                    const paginationFooter = `
-                        <div id="loadMoreContainer" class="py-4 text-center">
-                            <p class="text-text-secondary text-sm mb-2">Showing ${appState.loadedTransactions.length} of ${appState.totalTransactions} transactions</p>
-                            ${hasMore ? `<button onclick="screens.loadStatements(true)" class="h-10 px-6 bg-primary text-white font-bold text-sm rounded-lg hover:bg-primary/90">Load More</button>` : ''}
-                        </div>`;
-
-                    list.innerHTML = transactionCards + paginationFooter;
-                } catch (e) {
-                    if (requestToken === appState.currentRequestToken) {
-                        if (!append) {
-                            list.innerHTML = '<p class="text-center text-red-500 py-8">Failed to load</p>';
-                        }
-                    }
-                }
+                    const footer = `<div class="py-4 text-center"><p class="text-text-secondary text-sm mb-2">Showing ${appState.loadedTransactions.length} of ${appState.totalTransactions}</p>${hasMore ? `<button onclick="screens.loadStatements(true)" class="h-10 px-6 bg-primary text-white font-bold text-sm rounded-lg">Load More</button>` : ''}</div>`;
+                    list.innerHTML = cards + footer;
+                } catch (e) { if (requestToken === appState.currentRequestToken && !append) list.innerHTML = '<p class="text-center text-red-500 py-8">Failed to load</p>'; }
             },
 
-            renderFilterTags() {
-                const container = document.getElementById('activeFilterTags');
-                if (!container) return;
-
-                const { accountName, accountType, categoryId, dateFrom, dateTo } = appState.filters;
-                const tags = [];
-
-                if (accountName) {
-                    tags.push({ label: accountName, key: 'accountName', icon: 'account_balance' });
-                }
-                if (accountType) {
-                    tags.push({ label: accountType, key: 'accountType', icon: 'credit_card' });
-                }
-                if (categoryId) {
-                    const cat = (appState._categories || []).find(c => c.id == categoryId);
-                    tags.push({ label: cat ? cat.name : categoryId, key: 'categoryId', icon: 'category' });
-                }
-                if (dateFrom) {
-                    tags.push({ label: 'From: ' + new Date(dateFrom + 'T00:00:00').toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }), key: 'dateFrom', icon: 'calendar_month' });
-                }
-                if (dateTo) {
-                    tags.push({ label: 'To: ' + new Date(dateTo + 'T00:00:00').toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }), key: 'dateTo', icon: 'event' });
-                }
-
-                if (tags.length === 0) {
-                    container.classList.add('hidden');
-                    container.innerHTML = '';
-                    // Update filter button badge
-                    const toggle = document.getElementById('filterBarToggle');
-                    if (toggle) {
-                        toggle.className = 'flex items-center gap-1.5 h-8 px-3 rounded-full text-sm border transition-colors bg-white dark:bg-surface-dark border-gray-200 dark:border-gray-700 text-text-secondary hover:border-primary hover:text-primary';
-                        const badge = toggle.querySelector('.filter-badge');
-                        if (badge) badge.remove();
-                    }
-                    return;
-                }
-
-                container.classList.remove('hidden');
-                container.innerHTML = tags.map(tag => `
-                    <button onclick="screens.removeFilter('${tag.key}')" class="group flex items-center gap-1.5 h-7 pl-2.5 pr-2 rounded-full bg-primary/10 border border-primary/30 text-primary text-xs font-semibold hover:bg-primary/20 transition-colors">
-                        <span class="material-symbols-outlined text-sm">${tag.icon}</span>
-                        <span>${tag.label}</span>
-                        <span class="material-symbols-outlined text-sm opacity-60 group-hover:opacity-100">close</span>
-                    </button>
-                `).join('');
-
-                // Update filter button to show active state with badge
-                const toggle = document.getElementById('filterBarToggle');
-                if (toggle) {
-                    toggle.className = 'flex items-center gap-1.5 h-8 px-3 rounded-full text-sm border transition-colors bg-primary/10 border-primary text-primary';
-                    // Update or add badge
-                    let badge = toggle.querySelector('.filter-badge');
-                    if (!badge) {
-                        badge = document.createElement('span');
-                        badge.className = 'filter-badge w-5 h-5 rounded-full bg-primary text-white text-xs flex items-center justify-center font-bold';
-                        toggle.appendChild(badge);
-                    }
-                    badge.textContent = tags.length;
-                }
-            },
-
-            removeFilter(key) {
-                appState.filters[key] = '';
-                // Clear Flatpickr date pickers if removing a date filter
-                if (appState._datePickers) {
-                    if (key === 'dateFrom') {
-                        appState._datePickers.fromPicker.clear();
-                        appState._datePickers.toPicker.set('minDate', null);
-                    }
-                    if (key === 'dateTo') {
-                        appState._datePickers.toPicker.clear();
-                        appState._datePickers.fromPicker.set('maxDate', null);
-                    }
-                }
-                // Also update the input element in the popover
-                const selectMap = { accountName: 'filterAccountName', accountType: 'filterAccountType', categoryId: 'filterCategory' };
-                const el = document.getElementById(selectMap[key]);
-                if (el) el.value = '';
-                appState.listScroll = 0;
-                this.renderFilterTags();
-                this.loadStatements();
-            },
-
-            clearFilters() {
-                appState.filters = { status: '', accountName: '', accountType: '', categoryId: '', dateFrom: '', dateTo: '' };
-                router.navigate('list'); // Re-renders header with correct state
-            },
-
-            // Details/Approve Screen
+            // ─── Transaction Details / Review ─────────────────────────────────
             details(id) {
                 return `
                 <div class="flex flex-col min-h-screen">
-                    <header class="flex items-center p-4 border-b border-gray-200 dark:border-border-dark">
-                        <button onclick="router.navigate('list')" class="p-2 -ml-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700">
-                            <span class="material-symbols-outlined">arrow_back</span>
-                        </button>
+                    <header class="flex items-center p-4 border-b border-border-dark">
+                        <button onclick="router.navigate('list')" class="p-2 -ml-2 rounded-full hover:bg-gray-700"><span class="material-symbols-outlined">arrow_back</span></button>
                         <h1 class="text-lg font-bold ml-2">Transaction Details</h1>
                     </header>
-                    <main id="detailsContent" class="flex-1 p-4 pb-32">
-                        <div class="flex justify-center py-8"><div class="size-8 border-2 border-primary/30 border-t-primary rounded-full animate-spin"></div></div>
-                    </main>
-                    <footer id="detailsFooter" class="fixed bottom-0 left-0 right-0 p-4 pb-8 bg-background-light dark:bg-background-dark border-t border-gray-200 dark:border-border-dark hidden">
-                        <button id="approveBtn" class="w-full h-12 bg-primary text-white font-bold rounded-xl flex items-center justify-center gap-2">
-                            <span class="material-symbols-outlined">check</span> Review
-                        </button>
+                    <main id="detailsContent" class="flex-1 p-4 pb-32"><div class="flex justify-center py-8"><div class="size-8 border-2 border-primary/30 border-t-primary rounded-full animate-spin"></div></div></main>
+                    <footer id="detailsFooter" class="fixed bottom-0 left-0 right-0 p-4 pb-8 bg-background-dark border-t border-border-dark hidden">
+                        <button id="approveBtn" class="w-full h-12 bg-primary text-white font-bold rounded-xl flex items-center justify-center gap-2"><span class="material-symbols-outlined">check</span> Review</button>
                     </footer>
                 </div>`;
             },
@@ -948,508 +369,391 @@
                 const content = document.getElementById('detailsContent');
                 const footer = document.getElementById('detailsFooter');
                 try {
-                    const t = await api.getTransaction(id);
-                    const isPending = t.review_status !== 'reviewed';
+                    const [t, suggestion] = await Promise.all([api.getTransaction(id), api.getMerchantSuggestion(id)]);
+                    const isPending = t.review_status === 'pending';
+                    const merchantDisplay = t.merchant_name || t.cleaned_details || null;
+                    const notesRequired = suggestion.suggestion?.notes_required || false;
+
+                    const amtClass = t.debit ? 'text-red-500' : 'text-green-500';
+                    const amtStr = t.debit ? `- ₹${t.debit.toLocaleString()}` : t.credit ? `+ ₹${t.credit.toLocaleString()}` : '₹0';
 
                     content.innerHTML = `
                         <div class="space-y-4">
-                            <div class="bg-white dark:bg-surface-dark p-4 rounded-xl">
-                                <h3 class="text-sm font-bold text-text-secondary mb-3">Transaction Info</h3>
-                                <div class="space-y-2 text-sm">
-                                    <div class="flex justify-between"><span class="text-text-secondary">Date</span><span>${t.Date || '-'}</span></div>
-                                    <div class="flex justify-between"><span class="text-text-secondary">Amount</span><span class="font-bold ${t.Debit ? 'text-red-500' : 'text-green-500'}">${t.Debit ? `- ₹${t.Debit.toLocaleString()}` : t.Credit ? `+ ₹${t.Credit.toLocaleString()}` : '₹0'}</span></div>
-                                    <div class="flex justify-between"><span class="text-text-secondary">Type</span><span>${t.Debit ? 'Debit' : 'Credit'}</span></div>
-                                    <div class="flex justify-between"><span class="text-text-secondary">Account</span><span>${t.Account_name || '-'}</span></div>
-                                    <div class="flex justify-between"><span class="text-text-secondary">Account Type</span><span>${t.Account_type || '-'}</span></div>
-                                    <div><span class="text-text-secondary">Details</span><p class="mt-1">${t.Details || '-'}</p></div>
-                                </div>
+                            <div class="bg-surface-dark p-4 rounded-xl">
+                                ${merchantDisplay ? `<p class="text-xl font-bold capitalize">${merchantDisplay}</p><p class="text-sm text-text-secondary mt-1">${[t.flow_direction, t.account_name].filter(Boolean).join(' • ')}</p>` : `<p class="text-lg font-bold">${t.raw_details || 'Transaction'}</p>`}
+                                <p class="text-2xl font-bold mt-3 ${amtClass}">${amtStr}</p>
+                                <p class="text-sm text-text-secondary mt-1">${t.parsed_date || t.raw_date || ''}</p>
                             </div>
-                            
-                            <div class="bg-white dark:bg-surface-dark p-4 rounded-xl space-y-4">
-                                <h3 class="text-sm font-bold text-text-secondary">Review Transaction</h3>
+
+                            <details class="bg-surface-dark rounded-xl">
+                                <summary class="p-4 cursor-pointer text-sm font-bold text-text-secondary flex items-center gap-2"><span class="material-symbols-outlined text-base">info</span> Raw Details</summary>
+                                <div class="px-4 pb-4 text-xs font-mono break-all bg-background-dark mx-4 mb-4 p-2 rounded">${t.raw_details || '-'}</div>
+                            </details>
+
+                            <div id="suggestionBanner" class="hidden"></div>
+
+                            <div class="bg-surface-dark p-4 rounded-xl space-y-4">
+                                <h3 class="text-sm font-bold text-text-secondary">Review</h3>
                                 <div>
-                                    <label class="text-xs text-text-secondary">Category</label>
-                                    <select id="reviewCategory" class="w-full h-10 px-3 mt-1 rounded-lg border border-gray-300 dark:border-border-dark bg-white dark:bg-surface-dark text-sm">
+                                    <label class="text-xs text-text-secondary">L1 Category</label>
+                                    <select id="reviewL1" class="w-full h-10 px-3 mt-1 rounded-lg border border-border-dark bg-surface-dark text-sm">
                                         <option value="">- Select Category -</option>
                                     </select>
                                 </div>
                                 <div>
+                                    <label class="text-xs text-text-secondary">L2 Sub-category (optional)</label>
+                                    <select id="reviewL2" class="w-full h-10 px-3 mt-1 rounded-lg border border-border-dark bg-surface-dark text-sm">
+                                        <option value="">- None -</option>
+                                    </select>
+                                </div>
+                                <div>
                                     <label class="text-xs text-text-secondary">Notes</label>
-                                    <textarea id="reviewNotes" class="w-full h-16 p-3 mt-1 rounded-lg border border-gray-300 dark:border-border-dark bg-white dark:bg-surface-dark text-sm resize-none"></textarea>
+                                    ${notesRequired ? `<p class="text-xs text-yellow-500 mt-0.5 mb-1 flex items-center gap-1"><span class="material-symbols-outlined text-sm">info</span> Ambiguous merchant - a note helps future predictions</p>` : ''}
+                                    <textarea id="reviewNotes" placeholder="${notesRequired ? 'What did you buy?' : 'Optional notes...'}" class="w-full h-16 p-3 mt-1 rounded-lg border ${notesRequired ? 'border-yellow-500/50' : 'border-border-dark'} bg-surface-dark text-sm resize-none"></textarea>
                                 </div>
                             </div>
 
-                            <button id="deleteBtn" class="w-full h-12 bg-red-100 text-red-600 font-bold rounded-xl flex items-center justify-center gap-2">
-                                <span class="material-symbols-outlined">delete</span> Delete Transaction
-                            </button>
-                        </div>
-            `;
+                            <button id="deleteBtn" class="w-full h-12 bg-red-900/30 text-red-500 font-bold rounded-xl flex items-center justify-center gap-2"><span class="material-symbols-outlined">delete</span> Delete</button>
+                        </div>`;
 
-                    // Pre-fill form
-                    const categorySelect = document.getElementById('reviewCategory');
+                    // Populate L1 dropdown
+                    const l1Select = document.getElementById('reviewL1');
+                    const l2Select = document.getElementById('reviewL2');
                     const notesInput = document.getElementById('reviewNotes');
+                    const cats = getL1Categories();
 
-                    // Load categories
-                    try {
-                        const categories = await api.getCategories();
-                        categories.forEach(c => {
+                    cats.forEach(c => {
+                        const opt = document.createElement('option');
+                        opt.value = c.id; opt.textContent = c.name;
+                        l1Select.appendChild(opt);
+                    });
+
+                    // Cascade: when L1 changes, populate L2
+                    l1Select.onchange = () => {
+                        l2Select.innerHTML = '<option value="">- None -</option>';
+                        const children = getL2Children(l1Select.value);
+                        children.forEach(c => {
                             const opt = document.createElement('option');
-                            opt.value = c.name;
-                            opt.textContent = c.name;
-                            categorySelect.appendChild(opt);
+                            opt.value = c.id; opt.textContent = c.name;
+                            l2Select.appendChild(opt);
                         });
-                    } catch (e) { console.error('Failed to load categories', e); }
+                        if (t.l2_category_id) l2Select.value = t.l2_category_id;
+                    };
 
-                    if (t.Category) categorySelect.value = t.Category;
-                    // Use null check (not truthy) so empty string is respected as a valid saved value
-                    if (t.Notes != null && t.Notes !== '') notesInput.value = t.Notes;
-                    else if (t.Notes === '') notesInput.value = '';  // User intentionally cleared Notes
-                    else notesInput.value = t.Details || '';  // Notes was never set — show Details as default
+                    // Pre-fill
+                    if (t.l1_category_id) { l1Select.value = t.l1_category_id; l1Select.onchange(); }
+                    if (t.notes) notesInput.value = t.notes;
+
+                    // Suggestion banner
+                    if (suggestion.suggestion && isPending) {
+                        const s = suggestion.suggestion;
+                        const banner = document.getElementById('suggestionBanner');
+                        if (s.confidence === 'deterministic') {
+                            banner.innerHTML = `<div class="bg-green-900/20 border border-green-800 p-3 rounded-xl flex items-center justify-between">
+                                <div><p class="text-sm font-bold text-green-400">Suggested: ${s.l1_category_name}${s.l2_category_name ? ' > ' + s.l2_category_name : ''}</p><p class="text-xs text-green-500">Based on ${s.occurrence_count} past transactions</p></div>
+                                <button onclick="document.getElementById('reviewL1').value='${s.l1_category_id}';document.getElementById('reviewL1').onchange()" class="px-3 py-1.5 bg-green-600 text-white text-xs font-bold rounded-lg">Apply</button>
+                            </div>`;
+                        } else {
+                            banner.innerHTML = `<div class="bg-yellow-900/20 border border-yellow-800 p-3 rounded-xl"><p class="text-sm font-bold text-yellow-400">Ambiguous merchant</p><p class="text-xs text-yellow-500">Multiple categories used. Add a note to help.</p></div>`;
+                        }
+                        banner.classList.remove('hidden');
+                    }
 
                     footer.classList.remove('hidden');
                     const approveBtn = document.getElementById('approveBtn');
-                    approveBtn.innerHTML = isPending ? '<span class="material-symbols-outlined">check</span> Review' : '<span class="material-symbols-outlined">update</span> Update Review';
+                    approveBtn.innerHTML = isPending ? '<span class="material-symbols-outlined">check</span> Review' : '<span class="material-symbols-outlined">update</span> Update';
 
                     approveBtn.onclick = async () => {
-                        const data = {
-                            Category: categorySelect.value,
-                            Notes: notesInput.value
-                        };
-                        try {
-                            const result = await api.reviewTransaction(id, data);
-                            if (result.success) router.navigate('list');
-                            else alert('Failed: ' + (result.detail || 'Unknown error'));
-                        } catch (e) { alert('Failed: ' + e.message); }
+                        if (!l1Select.value) { alert('Please select a category'); return; }
+                        const data = { l1_category_id: l1Select.value, l2_category_id: l2Select.value || null, notes: notesInput.value || null, review_status: 'approved' };
+                        try { const r = await api.reviewTransaction(id, data); if (r.success) router.navigate('list'); else alert(r.detail || 'Failed'); } catch (e) { alert(e.message); }
                     };
 
                     document.getElementById('deleteBtn').onclick = async () => {
-                        if (!confirm('Are you sure you want to delete this transaction?')) return;
-                        try {
-                            const result = await api.deleteTransaction(id);
-                            if (result.success) {
-                                alert(result.message);
-                                router.navigate('list');
-                            }
-                            else alert('Failed: ' + (result.detail || 'Unknown error'));
-                        } catch (e) { alert('Failed: ' + e.message); }
+                        if (!confirm('Delete this transaction?')) return;
+                        try { const r = await api.deleteTransaction(id); if (r.success) router.navigate('list'); } catch (e) { alert(e.message); }
                     };
-                } catch (e) {
-                    content.innerHTML = '<p class="text-center text-red-500 py-8">Failed to load</p>';
-                }
+                } catch (e) { content.innerHTML = '<p class="text-center text-red-500 py-8">Failed to load</p>'; console.error(e); }
             },
 
-            // Add Manual Expense Screen
+            // ─── Add Manual Expense ───────────────────────────────────────────
             addExpense() {
                 return `
                 <div class="flex flex-col min-h-screen">
-                    <header class="flex items-center p-4 border-b border-gray-200 dark:border-border-dark">
-                        <button onclick="router.navigate('home')" class="p-2 -ml-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700">
-                            <span class="material-symbols-outlined">arrow_back</span>
-                        </button>
+                    <header class="flex items-center p-4 border-b border-border-dark">
+                        <button onclick="router.navigate('home')" class="p-2 -ml-2 rounded-full hover:bg-gray-700"><span class="material-symbols-outlined">arrow_back</span></button>
                         <h1 class="text-lg font-bold ml-2">Add Expense</h1>
                     </header>
                     <main class="flex-1 p-4 space-y-4">
                         <div class="grid grid-cols-2 gap-3">
-                            <div>
-                                <label class="text-sm font-medium">Date</label>
-                                <input id="manualTime" type="date" class="w-full h-12 px-4 mt-1 rounded-lg border border-gray-300 dark:border-border-dark bg-white dark:bg-surface-dark" value="${new Date().toISOString().split('T')[0]}" />
-                            </div>
-                            <div>
-                                <label class="text-sm font-medium">Type</label>
-                                <select id="manualType" class="w-full h-12 px-4 mt-1 rounded-lg border border-gray-300 dark:border-border-dark bg-white dark:bg-surface-dark">
-                                    <option value="Debit">Debit</option>
-                                    <option value="Credit">Credit</option>
-                                </select>
-                            </div>
+                            <div><label class="text-sm font-medium">Date</label><input id="manualDate" type="date" class="w-full h-12 px-4 mt-1 rounded-lg border border-border-dark bg-surface-dark" value="${new Date().toISOString().split('T')[0]}" /></div>
+                            <div><label class="text-sm font-medium">Type</label><select id="manualType" class="w-full h-12 px-4 mt-1 rounded-lg border border-border-dark bg-surface-dark"><option value="Debit">Debit</option><option value="Credit">Credit</option></select></div>
                         </div>
-                        <div>
-                            <label class="text-sm font-medium">Amount</label>
-                            <input id="manualAmount" type="number" step="0.01" placeholder="0.00" class="w-full h-12 px-4 mt-1 rounded-lg border border-gray-300 dark:border-border-dark bg-white dark:bg-surface-dark" />
-                        </div>
+                        <div><label class="text-sm font-medium">Amount</label><input id="manualAmount" type="number" step="0.01" placeholder="0.00" class="w-full h-12 px-4 mt-1 rounded-lg border border-border-dark bg-surface-dark" /></div>
+                        <div><label class="text-sm font-medium">Details</label><input id="manualDetails" type="text" placeholder="Description" class="w-full h-12 px-4 mt-1 rounded-lg border border-border-dark bg-surface-dark" /></div>
                         <div class="grid grid-cols-2 gap-3">
-                            <div>
-                                <label class="text-sm font-medium">Category</label>
-                                <select id="manualCategory" class="w-full h-12 px-4 mt-1 rounded-lg border border-gray-300 dark:border-border-dark bg-white dark:bg-surface-dark">
-                                    <option value="">- Select Category -</option>
-                                </select>
-                            </div>
-                            <div>
-                                <label class="text-sm font-medium">Account</label>
-                                <input id="manualAccount" type="text" placeholder="Cash, Bank..." class="w-full h-12 px-4 mt-1 rounded-lg border border-gray-300 dark:border-border-dark bg-white dark:bg-surface-dark" />
-                            </div>
+                            <div><label class="text-sm font-medium">Account</label><input id="manualAccount" type="text" placeholder="HDFC, Cash..." class="w-full h-12 px-4 mt-1 rounded-lg border border-border-dark bg-surface-dark" /></div>
+                            <div><label class="text-sm font-medium">Account Type</label><select id="manualAccountType" class="w-full h-12 px-4 mt-1 rounded-lg border border-border-dark bg-surface-dark"><option value="Savings">Savings</option><option value="Credit Card">Credit Card</option><option value="Current">Current</option><option value="Cash">Cash</option></select></div>
                         </div>
-                        <div>
-                             <label class="text-sm font-medium">Account Type</label>
-                             <select id="manualAccountType" class="w-full h-12 px-4 mt-1 rounded-lg border border-gray-300 dark:border-border-dark bg-white dark:bg-surface-dark">
-                                 <option value="Savings">Savings</option>
-                                 <option value="Credit Card">Credit Card</option>
-                                 <option value="Current">Current</option>
-                             </select>
-                        </div>
-                        <div>
-                            <label class="text-sm font-medium">Notes</label>
-                            <textarea id="manualNotes" class="w-full h-20 p-4 mt-1 rounded-lg border border-gray-300 dark:border-border-dark bg-white dark:bg-surface-dark resize-none" placeholder="Optional notes..."></textarea>
-                        </div>
+                        <div><label class="text-sm font-medium">Category</label><select id="manualCategory" class="w-full h-12 px-4 mt-1 rounded-lg border border-border-dark bg-surface-dark"><option value="">- Optional -</option></select></div>
+                        <div><label class="text-sm font-medium">Notes</label><textarea id="manualNotes" class="w-full h-20 p-4 mt-1 rounded-lg border border-border-dark bg-surface-dark resize-none" placeholder="Optional notes..."></textarea></div>
                     </main>
-                    <footer class="p-4 pb-8">
-                        <button id="saveExpenseBtn" class="w-full h-12 bg-primary text-white font-bold rounded-xl flex items-center justify-center gap-2">
-                            <span class="material-symbols-outlined">save</span> Save Transaction
-                        </button>
-                    </footer>
+                    <footer class="p-4 pb-8"><button id="saveExpenseBtn" class="w-full h-12 bg-primary text-white font-bold rounded-xl flex items-center justify-center gap-2"><span class="material-symbols-outlined">save</span> Save</button></footer>
                 </div>`;
             },
             async initAddExpense() {
-                // Load categories
-                try {
-                    const catSelect = document.getElementById('manualCategory');
-                    const categories = await api.getCategories();
-                    categories.forEach(c => {
-                        const opt = document.createElement('option');
-                        opt.value = c.name;
-                        opt.textContent = c.name;
-                        catSelect.appendChild(opt);
-                    });
-                } catch (e) { console.error('Failed to load categories', e); }
+                const catSelect = document.getElementById('manualCategory');
+                getL1Categories().forEach(c => { const o = document.createElement('option'); o.value = c.id; o.textContent = c.name; catSelect.appendChild(o); });
 
                 document.getElementById('saveExpenseBtn').onclick = async () => {
                     const amount = parseFloat(document.getElementById('manualAmount').value) || 0;
+                    if (!amount) { alert('Enter amount'); return; }
                     const type = document.getElementById('manualType').value;
                     const data = {
-                        Date: document.getElementById('manualTime').value,
-                        Details: document.getElementById('manualNotes').value || 'Manual entry',
-                        Debit: type === 'Debit' ? amount : undefined,
-                        Credit: type === 'Credit' ? amount : undefined,
-                        Account_name: document.getElementById('manualAccount').value,
+                        Date: document.getElementById('manualDate').value,
+                        Details: document.getElementById('manualDetails').value || 'Manual entry',
+                        Debit: type === 'Debit' ? amount : null,
+                        Credit: type === 'Credit' ? amount : null,
+                        Account_name: document.getElementById('manualAccount').value || 'Cash',
                         Account_type: document.getElementById('manualAccountType').value,
-                        Category: document.getElementById('manualCategory').value,
-                        Notes: document.getElementById('manualNotes').value
+                        l1_category_id: catSelect.value || null,
+                        Notes: document.getElementById('manualNotes').value || null,
                     };
-                    if (!amount) { alert('Please enter amount'); return; }
-                    try {
-                        const result = await api.createTransaction(data);
-                        if (result.success) { alert('Transaction saved!'); router.navigate('home'); }
-                        else alert('Failed: ' + (result.detail || 'Unknown error'));
-                    } catch (e) { alert('Failed: ' + e.message); }
+                    try { const r = await api.createTransaction(data); if (r.success) { alert('Saved!'); router.navigate('home'); } else alert(r.detail || 'Failed'); } catch (e) { alert(e.message); }
                 };
             },
 
-            // Categories Screen
-            categories() {
+            // ─── Categories ───────────────────────────────────────────────────
+            categoriesScreen() {
                 return `
                 <div class="flex flex-col min-h-screen pb-16">
-                    <header class="flex items-center p-4 border-b border-gray-200 dark:border-border-dark">
+                    <header class="flex items-center justify-between p-4 border-b border-border-dark">
                         <h1 class="text-lg font-bold">Categories</h1>
+                        <button onclick="screens.openCategoryModal()" class="flex items-center gap-1 h-8 px-3 rounded-lg bg-primary text-white text-sm font-semibold">
+                            <span class="material-symbols-outlined text-lg">add</span> Add
+                        </button>
                     </header>
-                    <main id="categoriesList" class="flex-1 p-4 space-y-3 pb-20">
-                        <div class="flex justify-center py-8"><div class="size-8 border-2 border-primary/30 border-t-primary rounded-full animate-spin"></div></div>
-                    </main>
-                    
-                    <!-- FAB -->
-                    <button onclick="router.navigate('addCategory')" class="fixed bottom-20 right-4 w-14 h-14 bg-primary text-white rounded-full shadow-lg flex items-center justify-center hover:bg-primary/90 z-10">
-                        <span class="material-symbols-outlined text-3xl">add</span>
-                    </button>
-                    
-                    <!-- Bottom Navigation -->
+                    <main id="categoriesList" class="flex-1 p-4 space-y-3 pb-20"><div class="flex justify-center py-8"><div class="size-8 border-2 border-primary/30 border-t-primary rounded-full animate-spin"></div></div></main>
                     ${this.renderNav('categories')}
-                </div>`;
-            },
-            async initCategories() {
-                const list = document.getElementById('categoriesList');
-                try {
-                    const categories = await api.getCategories();
-                    if (categories.length === 0) {
-                        list.innerHTML = '<p class="text-center text-text-secondary py-8">No categories found</p>';
-                        return;
-                    }
-                    list.innerHTML = categories.map(c => `
-                        <div class="bg-white dark:bg-surface-dark p-4 rounded-xl flex justify-between items-center">
-                            <div class="flex items-center gap-3">
-                                <div class="size-10 rounded-full flex items-center justify-center ${c.type === 'INCOME' ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'}">
-                                    <span class="material-symbols-outlined">${c.type === 'INCOME' ? 'trending_up' : 'trending_down'}</span>
+
+                    <!-- Category Modal -->
+                    <div id="categoryModal" class="fixed inset-0 bg-black/60 items-center justify-center z-50 hidden">
+                        <div class="bg-surface-dark rounded-xl p-6 w-[90%] max-w-md border border-border-dark">
+                            <h2 id="catModalTitle" class="text-lg font-bold mb-4">Add Category</h2>
+                            <div class="space-y-3">
+                                <div><label class="text-xs text-text-secondary">Name</label><input id="catModalName" type="text" placeholder="Category name" class="w-full h-10 px-3 mt-1 rounded-lg bg-background-dark border border-border-dark" /></div>
+                                <div><label class="text-xs text-text-secondary">Level</label>
+                                    <select id="catModalLevel" class="w-full h-10 px-3 mt-1 rounded-lg bg-background-dark border border-border-dark text-sm">
+                                        <option value="1">L1 - Main Category</option>
+                                        <option value="2">L2 - Sub-category</option>
+                                    </select>
                                 </div>
-                                <div>
-                                    <p class="font-bold">${c.name}</p>
-                                    <p class="text-xs text-text-secondary">${c.type}</p>
+                                <div id="catModalParentWrap" class="hidden"><label class="text-xs text-text-secondary">Parent (L1)</label>
+                                    <select id="catModalParent" class="w-full h-10 px-3 mt-1 rounded-lg bg-background-dark border border-border-dark text-sm"></select>
                                 </div>
+                                <div><label class="text-xs text-text-secondary">Color</label><input id="catModalColor" type="color" value="#137fec" class="w-full h-10 mt-1 rounded-lg bg-background-dark border border-border-dark cursor-pointer" /></div>
                             </div>
-                            <button onclick="if(confirm('Delete ${c.name}?')) api.deleteCategory('${c.id}').then(() => screens.initCategories())" class="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-full">
-                                <span class="material-symbols-outlined">delete</span>
-                            </button>
-                        </div>
-                    `).join('');
-                } catch (e) {
-                    list.innerHTML = '<p class="text-center text-red-500 py-8">Failed to load categories</p>';
-                }
-            },
-
-            // Add Category Screen
-            addCategory() {
-                return `
-                <div class="flex flex-col min-h-screen">
-                    <header class="flex items-center p-4 border-b border-gray-200 dark:border-border-dark">
-                        <button onclick="router.navigate('categories')" class="p-2 -ml-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700">
-                            <span class="material-symbols-outlined">arrow_back</span>
-                        </button>
-                        <h1 class="text-lg font-bold ml-2">Add Category</h1>
-                    </header>
-                    <main class="flex-1 p-4 space-y-4">
-                        <div>
-                            <label class="text-sm font-medium">Name</label>
-                            <input id="catName" type="text" placeholder="e.g. Groceries" class="w-full h-12 px-4 mt-1 rounded-lg border border-gray-300 dark:border-border-dark bg-white dark:bg-surface-dark" />
-                        </div>
-                        <div>
-                            <label class="text-sm font-medium">Type</label>
-                            <select id="catType" class="w-full h-12 px-4 mt-1 rounded-lg border border-gray-300 dark:border-border-dark bg-white dark:bg-surface-dark">
-                                <option value="EXPENSE">Expense</option>
-                                <option value="INCOME">Income</option>
-                            </select>
-                        </div>
-                    </main>
-                    <footer class="p-4 pb-8">
-                        <button id="saveCatBtn" class="w-full h-12 bg-primary text-white font-bold rounded-xl flex items-center justify-center gap-2">
-                            <span class="material-symbols-outlined">save</span> Save Category
-                        </button>
-                    </footer>
-                </div>`;
-            },
-            initAddCategory() {
-                document.getElementById('saveCatBtn').onclick = async () => {
-                    const name = document.getElementById('catName').value;
-                    const type = document.getElementById('catType').value;
-                    if (!name) { alert('Enter name'); return; }
-                    try {
-                        await api.createCategory({ name, type });
-                        router.navigate('categories');
-                    } catch (e) { alert('Failed: ' + e.message); }
-                };
-            },
-
-            // Settings Screen
-            settings() {
-                return `
-                <div class="flex flex-col min-h-screen pb-16">
-                    <header class="flex items-center p-4 border-b border-gray-200 dark:border-border-dark">
-                        <h1 class="text-lg font-bold">Settings</h1>
-                    </header>
-                    <main class="flex-1 p-4 space-y-4">
-                        <div class="bg-white dark:bg-surface-dark p-4 rounded-xl">
-                            <h3 class="font-bold mb-3">Data Management</h3>
-                            <button onclick="router.navigate('upload')" class="w-full flex items-center gap-4 p-3 bg-background-dark rounded-lg hover:bg-gray-700">
-                                <span class="material-symbols-outlined text-primary">upload_file</span>
-                                <div class="text-left"><p class="font-bold">Upload CSV</p><p class="text-sm text-text-secondary">Import bank statement</p></div>
-                            </button>
-                        </div>
-                        <div class="bg-white dark:bg-surface-dark p-4 rounded-xl">
-                            <h3 class="font-bold mb-3 text-red-500">Danger Zone</h3>
-                            <button id="clearTransactionsBtn" class="w-full h-10 bg-red-100 dark:bg-red-900/30 text-red-600 font-bold rounded-lg">Clear All Transactions</button>
-                        </div>
-                    </main>
-
-                    <!-- Bottom Navigation -->\n                    ${this.renderNav(this.currentRoute)}
-                </div>`;
-            },
-            initSettings() {
-                document.getElementById('clearTransactionsBtn').onclick = async () => {
-                    if (!confirm('Delete ALL transaction records? This cannot be undone.')) return;
-                    try {
-                        const result = await api.clearTable('transactions');
-                        alert(result.message);
-                    } catch (e) { alert('Failed: ' + e.message); }
-                };
-            },
-
-            // Accounts Screen
-            accounts() {
-                return `
-                <div class="flex flex-col min-h-screen pb-16">
-                    <header class="flex items-center p-4 border-b border-gray-200 dark:border-border-dark">
-                        <h1 class="text-lg font-bold">Accounts</h1>
-                    </header>
-                    <main id="accountsList" class="flex-1 p-4 space-y-3">
-                        <div class="flex justify-center py-8"><div class="size-8 border-2 border-primary/30 border-t-primary rounded-full animate-spin"></div></div>
-                    </main>
-                    <footer class="p-4 pb-4">
-                        <button onclick="screens.openAccountModal()" class="w-full h-12 bg-surface-dark border border-border-dark text-white font-bold rounded-xl flex items-center justify-center gap-2 hover:bg-gray-700">
-                            <span class="material-symbols-outlined">add_circle</span> ADD NEW ACCOUNT
-                        </button>
-                    </footer>
-
-                    <!-- Bottom Navigation -->\n                    ${this.renderNav(this.currentRoute)}
-                </div>
-                
-                <!-- Account Modal -->
-                <div id="accountModal" class="fixed inset-0 bg-black/60 items-center justify-center z-50 hidden">
-                    <div class="bg-surface-dark rounded-xl p-6 w-[90%] max-w-md border border-border-dark">
-                        <h2 id="modalTitle" class="text-xl font-bold text-center mb-6">Add new account</h2>
-                        
-                        <div class="space-y-4">
-                            <div>
-                                <label class="text-text-secondary text-sm">Initial amount</label>
-                                <input id="accountAmount" type="number" step="0.01" value="0" class="w-full h-10 px-3 mt-1 rounded-lg bg-[#4a5e4a] text-white" />
-                                <p class="text-xs text-text-secondary mt-1 italic">*Initial amount will not be reflected in analysis</p>
+                            <div class="flex gap-3 mt-5">
+                                <button onclick="screens.closeCategoryModal()" class="flex-1 h-10 border border-border-dark rounded-lg font-bold text-sm">Cancel</button>
+                                <button id="catModalSaveBtn" class="flex-1 h-10 bg-primary text-white rounded-lg font-bold text-sm">Save</button>
                             </div>
-                            
-                            <div>
-                                <label class="text-text-secondary text-sm">Name</label>
-                                <input id="accountName" type="text" placeholder="Account name" class="w-full h-10 px-3 mt-1 rounded-lg bg-[#4a5e4a] text-white" />
-                            </div>
-                            
-                            <div>
-                                <label class="text-text-secondary text-sm">Account Type</label>
-                                <div id="accountTypeButtons" class="flex flex-wrap gap-2 mt-1">
-                                    <button data-type="SAVINGS" class="type-btn px-3 py-1.5 rounded-lg text-sm border border-border-dark">Savings</button>
-                                    <button data-type="CURRENT" class="type-btn px-3 py-1.5 rounded-lg text-sm border border-border-dark">Current</button>
-                                    <button data-type="CREDIT_CARD" class="type-btn px-3 py-1.5 rounded-lg text-sm border border-border-dark">Credit Card</button>
-                                    <button data-type="CASH" class="type-btn px-3 py-1.5 rounded-lg text-sm border border-border-dark">Cash</button>
-                                    <button data-type="WALLET" class="type-btn px-3 py-1.5 rounded-lg text-sm border border-border-dark">Wallet</button>
-                                    <button data-type="INVESTMENT" class="type-btn px-3 py-1.5 rounded-lg text-sm border border-border-dark">Investment</button>
-                                </div>
-                            </div>
-                        </div>
-                        
-                        <div class="flex justify-center gap-4 mt-6">
-                            <button onclick="screens.closeAccountModal()" class="px-6 py-2 bg-background-dark border border-border-dark rounded-lg font-bold">CANCEL</button>
-                            <button onclick="screens.saveAccount()" class="px-6 py-2 bg-[#4a5e4a] rounded-lg font-bold">SAVE</button>
                         </div>
                     </div>
                 </div>`;
             },
+            _catEditId: null,
+            async initCategories() {
+                const list = document.getElementById('categoriesList');
+                try {
+                    await loadCategories();
+                    const cats = getL1Categories();
+                    if (!cats.length) { list.innerHTML = '<p class="text-center text-text-secondary py-8">No categories</p>'; return; }
+                    list.innerHTML = cats.map(c => `
+                        <div class="bg-surface-dark p-4 rounded-xl">
+                            <div class="flex items-center gap-3 mb-2">
+                                <div class="w-3 h-3 rounded-full shrink-0" style="background:${c.color_hex || '#666'}"></div>
+                                <p class="font-bold flex-1">${c.name}</p>
+                                <span class="text-xs text-text-secondary px-2 py-0.5 rounded bg-background-dark">${c.domain || ''}</span>
+                                <button onclick="screens.openCategoryModal('${c.id}','${c.name.replace(/'/g, "\\'")}','${c.color_hex || ''}',1,null)" class="p-1 text-text-secondary hover:text-primary rounded"><span class="material-symbols-outlined text-lg">edit</span></button>
+                                <button onclick="screens.handleDeleteCategory('${c.id}','${c.name.replace(/'/g, "\\'")}')" class="p-1 text-text-secondary hover:text-red-500 rounded"><span class="material-symbols-outlined text-lg">delete</span></button>
+                            </div>
+                            ${c.children && c.children.length ? `
+                            <div class="ml-6 space-y-1.5 mt-2">
+                                ${c.children.map(ch => `
+                                <div class="flex items-center gap-2 group">
+                                    <span class="text-xs px-2 py-1 rounded bg-background-dark text-text-secondary flex-1">${ch.name}</span>
+                                    <button onclick="screens.openCategoryModal('${ch.id}','${ch.name.replace(/'/g, "\\'")}','${ch.color_hex || c.color_hex || ''}',2,'${c.id}')" class="p-0.5 text-text-secondary hover:text-primary opacity-0 group-hover:opacity-100 transition-opacity"><span class="material-symbols-outlined text-sm">edit</span></button>
+                                    <button onclick="screens.handleDeleteCategory('${ch.id}','${ch.name.replace(/'/g, "\\'")}')" class="p-0.5 text-text-secondary hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"><span class="material-symbols-outlined text-sm">delete</span></button>
+                                </div>`).join('')}
+                                <button onclick="screens.openCategoryModal(null,null,null,2,'${c.id}')" class="flex items-center gap-1 text-xs text-primary hover:underline mt-1 ml-2">
+                                    <span class="material-symbols-outlined text-sm">add</span> Add sub-category
+                                </button>
+                            </div>` : `
+                            <button onclick="screens.openCategoryModal(null,null,null,2,'${c.id}')" class="flex items-center gap-1 text-xs text-primary hover:underline ml-6 mt-1">
+                                <span class="material-symbols-outlined text-sm">add</span> Add sub-category
+                            </button>`}
+                        </div>`).join('');
+                } catch (e) { list.innerHTML = '<p class="text-center text-red-500 py-8">Failed to load</p>'; }
+            },
+            openCategoryModal(editId = null, name = null, color = null, level = 1, parentId = null) {
+                this._catEditId = editId;
+                const modal = document.getElementById('categoryModal');
+                document.getElementById('catModalTitle').textContent = editId ? 'Edit Category' : 'Add Category';
+                document.getElementById('catModalName').value = name || '';
+                document.getElementById('catModalColor').value = color || '#137fec';
+                const levelSelect = document.getElementById('catModalLevel');
+                levelSelect.value = String(level);
+                if (editId) levelSelect.disabled = true; else levelSelect.disabled = false;
 
+                const parentWrap = document.getElementById('catModalParentWrap');
+                const parentSelect = document.getElementById('catModalParent');
+
+                const showParent = () => {
+                    if (levelSelect.value === '2') {
+                        parentWrap.classList.remove('hidden');
+                        parentSelect.innerHTML = '';
+                        getL1Categories().forEach(c => { const o = document.createElement('option'); o.value = c.id; o.textContent = c.name; parentSelect.appendChild(o); });
+                        if (parentId) parentSelect.value = parentId;
+                    } else { parentWrap.classList.add('hidden'); }
+                };
+                showParent();
+                levelSelect.onchange = showParent;
+
+                document.getElementById('catModalSaveBtn').onclick = () => this.saveCategoryModal();
+                modal.classList.remove('hidden'); modal.classList.add('flex');
+            },
+            closeCategoryModal() {
+                document.getElementById('categoryModal').classList.add('hidden');
+                document.getElementById('categoryModal').classList.remove('flex');
+                this._catEditId = null;
+            },
+            async saveCategoryModal() {
+                const name = document.getElementById('catModalName').value.trim();
+                if (!name) { alert('Enter a name'); return; }
+                const color = document.getElementById('catModalColor').value;
+                const level = parseInt(document.getElementById('catModalLevel').value);
+                const parentId = level === 2 ? document.getElementById('catModalParent').value : null;
+
+                try {
+                    if (this._catEditId) {
+                        await api.updateCategory(this._catEditId, { name, color_hex: color });
+                    } else {
+                        const data = { name, level, color_hex: color };
+                        if (parentId) data.parent_id = parentId;
+                        const l1 = getL1Categories().find(c => c.id === parentId);
+                        if (l1) data.domain = l1.domain;
+                        await api.createCategory(data);
+                    }
+                    this.closeCategoryModal();
+                    await this.initCategories();
+                } catch (e) { alert('Failed: ' + e.message); }
+            },
+            async handleDeleteCategory(id, name) {
+                if (!confirm(`Delete "${name}"? This cannot be undone.`)) return;
+                try { await api.deleteCategory(id); await this.initCategories(); } catch (e) { alert('Failed: ' + e.message); }
+            },
+
+            // ─── Settings ─────────────────────────────────────────────────────
+            settings() {
+                return `
+                <div class="flex flex-col min-h-screen pb-16">
+                    <header class="flex items-center p-4 border-b border-border-dark"><h1 class="text-lg font-bold">Settings</h1></header>
+                    <main class="flex-1 p-4 space-y-4">
+                        <div class="bg-surface-dark p-4 rounded-xl">
+                            <button onclick="router.navigate('upload')" class="w-full flex items-center gap-4 p-3 rounded-lg hover:bg-gray-700"><span class="material-symbols-outlined text-primary">upload_file</span><div class="text-left"><p class="font-bold">Upload CSV</p><p class="text-sm text-text-secondary">Import bank statement</p></div></button>
+                        </div>
+                        <div class="bg-surface-dark p-4 rounded-xl">
+                            <h3 class="font-bold mb-3 text-red-500">Danger Zone</h3>
+                            <button id="clearBtn" class="w-full h-10 bg-red-900/30 text-red-500 font-bold rounded-lg">Clear All Transactions</button>
+                        </div>
+                    </main>
+                    ${this.renderNav('settings')}
+                </div>`;
+            },
+            initSettings() {
+                document.getElementById('clearBtn').onclick = async () => {
+                    if (!confirm('Delete ALL transactions? Cannot be undone.')) return;
+                    try { const r = await api.clearTable('transactions'); alert(r.message); } catch (e) { alert(e.message); }
+                };
+            },
+
+            // ─── Accounts ─────────────────────────────────────────────────────
+            accounts() {
+                return `
+                <div class="flex flex-col min-h-screen pb-16">
+                    <header class="flex items-center p-4 border-b border-border-dark"><h1 class="text-lg font-bold">Accounts</h1></header>
+                    <main id="accountsList" class="flex-1 p-4 space-y-3"><div class="flex justify-center py-8"><div class="size-8 border-2 border-primary/30 border-t-primary rounded-full animate-spin"></div></div></main>
+                    <footer class="p-4"><button onclick="screens.openAccountModal()" class="w-full h-12 bg-surface-dark border border-border-dark text-white font-bold rounded-xl flex items-center justify-center gap-2"><span class="material-symbols-outlined">add_circle</span> Add Account</button></footer>
+                    ${this.renderNav('accounts')}
+                    <div id="accountModal" class="fixed inset-0 bg-black/60 items-center justify-center z-50 hidden">
+                        <div class="bg-surface-dark rounded-xl p-6 w-[90%] max-w-md border border-border-dark">
+                            <h2 id="modalTitle" class="text-xl font-bold text-center mb-6">Add Account</h2>
+                            <div class="space-y-4">
+                                <div><label class="text-text-secondary text-sm">Initial amount</label><input id="accountAmount" type="number" step="0.01" value="0" class="w-full h-10 px-3 mt-1 rounded-lg bg-background-dark" /></div>
+                                <div><label class="text-text-secondary text-sm">Name</label><input id="accountNameInput" type="text" placeholder="Account name" class="w-full h-10 px-3 mt-1 rounded-lg bg-background-dark" /></div>
+                                <div><label class="text-text-secondary text-sm">Type</label>
+                                    <div id="accountTypeButtons" class="flex flex-wrap gap-2 mt-1">
+                                        <button data-type="SAVINGS" class="type-btn px-3 py-1.5 rounded-lg text-sm border border-border-dark">Savings</button>
+                                        <button data-type="CURRENT" class="type-btn px-3 py-1.5 rounded-lg text-sm border border-border-dark">Current</button>
+                                        <button data-type="CREDIT_CARD" class="type-btn px-3 py-1.5 rounded-lg text-sm border border-border-dark">Credit Card</button>
+                                        <button data-type="CASH" class="type-btn px-3 py-1.5 rounded-lg text-sm border border-border-dark">Cash</button>
+                                        <button data-type="WALLET" class="type-btn px-3 py-1.5 rounded-lg text-sm border border-border-dark">Wallet</button>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="flex gap-4 mt-6">
+                                <button onclick="screens.closeAccountModal()" class="flex-1 h-10 border border-border-dark rounded-lg font-bold">Cancel</button>
+                                <button onclick="screens.saveAccount()" class="flex-1 h-10 bg-primary rounded-lg font-bold text-white">Save</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>`;
+            },
             accountModalState: { editingId: null, selectedType: null },
-
             async initAccounts() {
                 const list = document.getElementById('accountsList');
                 try {
                     const data = await api.getAccounts();
-                    if (data.accounts.length === 0) {
-                        list.innerHTML = `
-                            <div class="text-center py-12">
-                                <span class="text-4xl">🏦</span>
-                                <p class="text-text-secondary mt-4">No accounts yet</p>
-                                <p class="text-sm text-text-secondary">Add your first account to get started</p>
-                            </div>`;
-                        return;
-                    }
-
-                    const getIcon = (type) => {
-                        const icons = { SAVINGS: '🐷', CURRENT: '🏦', CREDIT_CARD: '💳', CASH: '💵', WALLET: '👛', INVESTMENT: '📈' };
-                        return icons[type] || '💰';
-                    };
-
+                    if (!data.accounts.length) { list.innerHTML = '<p class="text-center text-text-secondary py-8">No accounts yet</p>'; return; }
                     list.innerHTML = data.accounts.map(a => `
-                        <div class="bg-white dark:bg-surface-dark p-4 rounded-xl flex items-center justify-between">
-                            <div class="flex items-center gap-3">
-                                <span class="text-2xl">${getIcon(a.account_type)}</span>
-                                <div>
-                                    <p class="font-bold">${a.name}</p>
-                                    <p class="text-sm text-text-secondary">Balance: ₹${a.balance.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</p>
-                                </div>
-                            </div>
-                            <div class="relative">
-                                <button onclick="screens.toggleAccountMenu('${a.id}')" class="p-2 hover:bg-gray-700 rounded-full">
-                                    <span class="material-symbols-outlined">more_vert</span>
-                                </button>
-                                <div id="menu-${a.id}" class="hidden absolute right-0 top-10 bg-background-dark border border-border-dark rounded-lg shadow-lg z-10">
-                                    <button onclick="screens.editAccount('${a.id}')" class="block w-full px-4 py-2 text-left hover:bg-gray-700">Edit</button>
-                                    <button onclick="screens.deleteAccount('${a.id}', '${a.name.replace(/'/g, "\\'")}')" class="block w-full px-4 py-2 text-left text-red-500 hover:bg-gray-700">Delete</button>
-                                </div>
-                            </div>
-                        </div>
-                    `).join('');
-                } catch (e) {
-                    list.innerHTML = '<p class="text-center text-red-500 py-8">Failed to load accounts</p>';
-                    console.error(e);
-                }
+                        <div class="bg-surface-dark p-4 rounded-xl flex items-center justify-between">
+                            <div><p class="font-bold">${a.name}</p><p class="text-sm text-text-secondary">Balance: ₹${a.balance.toLocaleString('en-IN', {minimumFractionDigits: 2})}</p></div>
+                            <button onclick="screens.deleteAccountById('${a.id}','${a.name.replace(/'/g, "\\'")}')" class="p-2 text-red-500 hover:bg-red-900/20 rounded-full"><span class="material-symbols-outlined">delete</span></button>
+                        </div>`).join('');
+                } catch (e) { list.innerHTML = '<p class="text-center text-red-500 py-8">Failed</p>'; }
             },
-
-            toggleAccountMenu(id) {
-                const menu = document.getElementById(`menu-${id}`);
-                document.querySelectorAll('[id^="menu-"]').forEach(m => {
-                    if (m.id !== `menu-${id}`) m.classList.add('hidden');
-                });
-                menu.classList.toggle('hidden');
-            },
-
             openAccountModal(account = null) {
                 this.accountModalState = { editingId: account?.id || null, selectedType: account?.account_type || null };
-                document.getElementById('modalTitle').textContent = account ? 'Edit account' : 'Add new account';
-                document.getElementById('accountName').value = account?.name || '';
+                document.getElementById('modalTitle').textContent = account ? 'Edit Account' : 'Add Account';
+                document.getElementById('accountNameInput').value = account?.name || '';
                 document.getElementById('accountAmount').value = account?.opening_balance || 0;
-
                 document.querySelectorAll('.type-btn').forEach(btn => {
                     btn.classList.remove('bg-primary', 'text-white');
-                    btn.classList.add('bg-background-dark');
-                    if (btn.dataset.type === this.accountModalState.selectedType) {
-                        btn.classList.add('bg-primary', 'text-white');
-                        btn.classList.remove('bg-background-dark');
-                    }
-                    btn.onclick = () => {
-                        document.querySelectorAll('.type-btn').forEach(b => {
-                            b.classList.remove('bg-primary', 'text-white');
-                            b.classList.add('bg-background-dark');
-                        });
-                        btn.classList.add('bg-primary', 'text-white');
-                        btn.classList.remove('bg-background-dark');
-                        this.accountModalState.selectedType = btn.dataset.type;
-                    };
+                    if (btn.dataset.type === this.accountModalState.selectedType) btn.classList.add('bg-primary', 'text-white');
+                    btn.onclick = () => { document.querySelectorAll('.type-btn').forEach(b => b.classList.remove('bg-primary', 'text-white')); btn.classList.add('bg-primary', 'text-white'); this.accountModalState.selectedType = btn.dataset.type; };
                 });
-
-                document.getElementById('accountModal').classList.remove('hidden');
-                document.getElementById('accountModal').classList.add('flex');
+                document.getElementById('accountModal').classList.remove('hidden'); document.getElementById('accountModal').classList.add('flex');
             },
-
-            closeAccountModal() {
-                document.getElementById('accountModal').classList.add('hidden');
-                document.getElementById('accountModal').classList.remove('flex');
-                this.accountModalState = { editingId: null, selectedType: null };
-            },
-
-            async editAccount(id) {
-                try {
-                    const account = (await api.getAccounts()).accounts.find(a => a.id === id);
-                    if (account) this.openAccountModal(account);
-                } catch (e) { alert('Failed to load account'); }
-            },
-
-            async deleteAccount(id, name) {
-                if (!confirm(`Delete account "${name}"?`)) return;
-                try {
-                    const result = await api.deleteAccount(id);
-                    if (result.success) this.initAccounts();
-                    else alert('Failed: ' + (result.detail || 'Unknown error'));
-                } catch (e) { alert('Failed: ' + e.message); }
-            },
-
+            closeAccountModal() { document.getElementById('accountModal').classList.add('hidden'); document.getElementById('accountModal').classList.remove('flex'); },
             async saveAccount() {
-                const name = document.getElementById('accountName').value.trim();
+                const name = document.getElementById('accountNameInput').value.trim();
                 const amount = parseFloat(document.getElementById('accountAmount').value) || 0;
                 const type = this.accountModalState.selectedType;
-
-                if (name.length < 2) { alert('Name must be at least 2 characters'); return; }
-                if (!type) { alert('Please select an account type'); return; }
-
-                const data = { name, account_type: type, opening_balance: amount, currency: 'INR' };
-
+                if (!name) { alert('Enter name'); return; }
+                if (!type) { alert('Select type'); return; }
                 try {
-                    let result;
-                    if (this.accountModalState.editingId) {
-                        result = await api.updateAccount(this.accountModalState.editingId, data);
-                    } else {
-                        result = await api.createAccount(data);
-                    }
-
-                    if (result.success) {
-                        this.closeAccountModal();
-                        this.initAccounts();
-                    } else {
-                        alert('Failed: ' + (result.detail || 'Unknown error'));
-                    }
-                } catch (e) { alert('Failed: ' + e.message); }
-            }
+                    const data = { name, account_type: type, opening_balance: amount, currency: 'INR' };
+                    const r = this.accountModalState.editingId ? await api.updateAccount(this.accountModalState.editingId, data) : await api.createAccount(data);
+                    if (r.success) { this.closeAccountModal(); this.initAccounts(); } else alert(r.detail || 'Failed');
+                } catch (e) { alert(e.message); }
+            },
+            async deleteAccountById(id, name) {
+                if (!confirm(`Delete "${name}"?`)) return;
+                try { const r = await api.deleteAccount(id); if (r.success) this.initAccounts(); } catch (e) { alert(e.message); }
+            },
         };
 
         router.render();
     </script>
 </body>
-
 </html>
