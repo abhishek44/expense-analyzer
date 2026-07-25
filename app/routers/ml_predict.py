@@ -1,16 +1,18 @@
 """ML prediction router for automatic transaction categorization."""
 
+import logging
 import subprocess
 import sys
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import Transaction, Category, ReviewStatus, CategorisedBy
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/ml", tags=["ML Predictions"])
 
 
@@ -96,8 +98,28 @@ async def predict_pending(req: BatchPredictRequest, db: Session = Depends(get_db
     }
 
 
+def _execute_model_training():
+    """Background worker to run training subprocess and reload model into memory."""
+    try:
+        logger.info("Starting ML model training in background...")
+        result = subprocess.run(
+            [sys.executable, "-m", "ml_model.train"],
+            capture_output=True,
+            text=True,
+            cwd=str(__import__("pathlib").Path(__file__).parent.parent.parent),
+        )
+        if result.returncode != 0:
+            logger.error(f"Training failed: {result.stderr or result.stdout}")
+        else:
+            logger.info("Training completed successfully. Reloading model...")
+            from ml_model import reload_model
+            reload_model()
+    except Exception as e:
+        logger.error(f"Exception during background model training: {e}", exc_info=True)
+
+
 @router.post("/train", summary="Train the category prediction model")
-async def train_model(db: Session = Depends(get_db)):
+async def train_model(background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     reviewed_count = db.query(Transaction).filter(
         Transaction.review_status != ReviewStatus.PENDING.value,
         Transaction.l1_category_id.isnot(None),
@@ -106,20 +128,12 @@ async def train_model(db: Session = Depends(get_db)):
     if reviewed_count < 20:
         raise HTTPException(status_code=400, detail=f"Need at least 20 reviewed transactions, found {reviewed_count}.")
 
-    result = subprocess.run(
-        [sys.executable, "-m", "ml_model.train"],
-        capture_output=True,
-        text=True,
-        cwd=str(__import__("pathlib").Path(__file__).parent.parent.parent),
-    )
-
-    if result.returncode != 0:
-        raise HTTPException(status_code=500, detail=f"Training failed: {result.stderr or result.stdout}")
-
-    from ml_model import reload_model
-    reload_model()
-
-    return {"success": True, "message": "Model trained successfully", "output": result.stdout}
+    background_tasks.add_task(_execute_model_training)
+    return {
+        "success": True,
+        "message": "Model training initiated in background",
+        "reviewed_transactions": reviewed_count,
+    }
 
 
 @router.get("/status", summary="Get ML model status")

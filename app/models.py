@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from enum import Enum
 
-from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, UniqueConstraint
+from sqlalchemy import Column, Integer, String, Float, Date, DateTime, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import declarative_base, relationship
 
 Base = declarative_base()
@@ -69,8 +69,8 @@ class Transaction(Base):
     debit = Column(Float, nullable=True)
     credit = Column(Float, nullable=True)
     account_name = Column(String(100), nullable=True)
-    account_type = Column(String(50), nullable=True)
-    filename = Column(String(255), nullable=False)
+    account_type = Column(String(50), nullable=True, index=True)
+    filename = Column(String(255), nullable=False, index=True)
     uploaded_at = Column(DateTime, nullable=False, default=datetime.now)
     notes = Column(String(500), nullable=True)
 
@@ -79,7 +79,7 @@ class Transaction(Base):
     flow_direction = Column(String(10), nullable=True)
 
     # Derived: date features
-    parsed_date = Column(String(10), nullable=True)
+    parsed_date = Column(String(10), nullable=True, index=True)
     day_of_week = Column(Integer, nullable=True)
     month = Column(Integer, nullable=True)
     is_weekend = Column(Integer, nullable=True)
@@ -90,13 +90,18 @@ class Transaction(Base):
     cleaned_details = Column(String(500), nullable=True)
 
     # Categorisation
-    l1_category_id = Column(String(36), ForeignKey("categories.id"), nullable=True)
-    l2_category_id = Column(String(36), ForeignKey("categories.id"), nullable=True)
+    l1_category_id = Column(String(36), ForeignKey("categories.id"), nullable=True, index=True)
+    l2_category_id = Column(String(36), ForeignKey("categories.id"), nullable=True, index=True)
     l2_confidence = Column(Float, nullable=True)
     categorised_by = Column(String(10), nullable=True)
 
+    # Statement metadata
+    statement_date = Column(Date, nullable=True)
+    mapping_date = Column(Date, nullable=True)
+    payment_verification = Column(String(200), nullable=True)
+
     # Review
-    review_status = Column(String(20), default=ReviewStatus.PENDING.value, nullable=False)
+    review_status = Column(String(20), default=ReviewStatus.PENDING.value, nullable=False, index=True)
     reviewed_at = Column(DateTime, nullable=True)
 
     # Relationships
@@ -130,6 +135,9 @@ class Transaction(Base):
             "l2_category_name": self.l2_category.name if self.l2_category else None,
             "l2_confidence": self.l2_confidence,
             "categorised_by": self.categorised_by,
+            "statement_date": self.statement_date.isoformat() if self.statement_date else None,
+            "mapping_date": self.mapping_date.isoformat() if self.mapping_date else None,
+            "payment_verification": self.payment_verification,
             "review_status": self.review_status,
             "reviewed_at": self.reviewed_at.isoformat() if self.reviewed_at else None,
         }
@@ -193,4 +201,25 @@ class Account(Base):
             "is_archived": self.is_archived,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
+class Budget(Base):
+    __tablename__ = "budgets"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    l1_category_name = Column(String(100), nullable=False)
+    amount_limit = Column(Float, nullable=False)
+    period = Column(String(20), nullable=False, default="MONTHLY")
+    is_active = Column(Integer, nullable=False, default=1)  # 1 = active, 0 = inactive
+    rollover = Column(Integer, nullable=False, default=0)   # 1 = yes, 0 = no
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "l1_category_name": self.l1_category_name,
+            "amount_limit": self.amount_limit,
+            "period": self.period,
+            "is_active": bool(self.is_active),
+            "rollover": bool(self.rollover),
         }

@@ -10,14 +10,9 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.models import Transaction
-from ml_model.preprocessing import extract_merchant, normalize_merchant, clean_transaction_text
+from ml_model.preprocessing import extract_merchant, normalize_merchant, clean_transaction_text, PLATFORM_MERCHANTS
 
 REQUIRED_CSV_COLUMNS = {"Date", "Details", "Debit", "Credit", "AccountName", "AccountType"}
-
-PLATFORM_MERCHANTS = frozenset([
-    "amazon", "flipkart", "myntra", "swiggy", "zomato", "zepto",
-    "blinkit", "bigbasket", "meesho", "ajio", "nykaa", "tatacliq",
-])
 
 
 def parse_csv_content(content: bytes) -> tuple[list[str], list[dict[str, str]]]:
@@ -66,9 +61,11 @@ def detect_flow_direction(details: str, debit: float | None, credit: float | Non
         transfer_signals = ["CREDIT CARD BILL", "CC BILL", "OWN ACCOUNT", "SELF TRANSFER"]
         if any(s in upper for s in transfer_signals):
             return "transfer"
-    if debit is not None:
+    if debit is not None and debit > 0:
         return "debit"
-    return "credit"
+    if credit is not None and credit > 0:
+        return "credit"
+    return "debit"  # fallback default
 
 
 def detect_transaction_type(details: str) -> str | None:
@@ -94,12 +91,12 @@ def detect_transaction_type(details: str) -> str | None:
 def compute_derived_fields(raw_date: str, raw_details: str, debit: float | None, credit: float | None) -> dict:
     """Compute all derived fields for a transaction row."""
     # Amount (signed)
-    if debit is not None:
+    if debit is not None and debit > 0:
         amount = -abs(debit)
-    elif credit is not None:
+    elif credit is not None and credit > 0:
         amount = abs(credit)
     else:
-        amount = None
+        amount = 0.0
 
     # Flow direction
     flow_direction = detect_flow_direction(raw_details, debit, credit)
@@ -185,10 +182,9 @@ def process_transaction_csv(
     # Sort by parsed_date ascending
     transactions_to_insert.sort(key=lambda t: t.get("parsed_date") or "0000-00-00")
 
-    for data in transactions_to_insert:
-        db.add(Transaction(**data))
-
-    db.commit()
+    if transactions_to_insert:
+        db.bulk_insert_mappings(Transaction, transactions_to_insert)
+        db.commit()
 
     return {
         "rows_inserted": len(transactions_to_insert),

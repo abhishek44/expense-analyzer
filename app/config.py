@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     # Application
     APP_NAME: str = "CSV Upload API"
     APP_VERSION: str = "1.0.0"
-    DEBUG: bool = True
+    DEBUG: bool = False
     
     # Database
     DATABASE_URL: str = "sqlite:///./expense_calculator.db"

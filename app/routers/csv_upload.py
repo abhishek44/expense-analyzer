@@ -2,19 +2,21 @@
 
 import csv
 import io
+import logging
 from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func, case
 
 from app.config import settings
 from app.database import get_db
 from app.models import Transaction, MerchantMapping, Category, ReviewStatus, CategorisedBy
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["Transactions"])
 
 
@@ -105,11 +107,23 @@ async def get_transactions(
     account_name: Optional[str] = None,
     account_type: Optional[str] = None,
     l1_category_id: Optional[str] = None,
+    l2_category_id: Optional[str] = None,
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
+    search: Optional[str] = None,
+    categories: Optional[str] = None,
     db: Session = Depends(get_db),
 ) -> dict:
     query = db.query(Transaction)
+    logger.debug(f"get_transactions received categories={categories}, l1_category_id={l1_category_id}")
+
+    if categories:
+        selected_categories = [c.strip() for c in categories.split(",") if c.strip()]
+        if selected_categories:
+            from app.models import Category
+            cat_ids = [c[0] for c in db.query(Category.id).filter(Category.name.in_(selected_categories), Category.level == 1).all()]
+            logger.debug(f"resolved cat_ids={cat_ids}")
+            query = query.filter(Transaction.l1_category_id.in_(cat_ids))
 
     if status_filter:
         query = query.filter(Transaction.review_status == status_filter)
@@ -118,16 +132,41 @@ async def get_transactions(
     if account_name:
         query = query.filter(Transaction.account_name.ilike(f"%{account_name}%"))
     if account_type:
-        query = query.filter(Transaction.account_type.ilike(f"%{account_type}%"))
+        from sqlalchemy import func
+        norm_type = account_type.lower().replace(" ", "").replace("_", "")
+        query = query.filter(
+            func.lower(func.replace(func.replace(Transaction.account_type, " ", ""), "_", "")) == norm_type
+        )
     if l1_category_id:
         query = query.filter(Transaction.l1_category_id == l1_category_id)
+    if l2_category_id:
+        query = query.filter(Transaction.l2_category_id == l2_category_id)
     if date_from:
-        query = query.filter(Transaction.parsed_date >= date_from)
+        start_d = date_from + "-01" if len(date_from) == 7 else date_from
+        query = query.filter(Transaction.parsed_date >= start_d)
     if date_to:
-        query = query.filter(Transaction.parsed_date <= date_to)
+        end_d = date_to + "-31" if len(date_to) == 7 else date_to
+        query = query.filter(Transaction.parsed_date <= end_d)
+    if search:
+        s = f"%{search}%"
+        from sqlalchemy import or_
+        query = query.filter(
+            or_(
+                Transaction.raw_details.ilike(s),
+                Transaction.cleaned_details.ilike(s),
+                Transaction.merchant_name.ilike(s),
+                Transaction.notes.ilike(s)
+            )
+        )
 
     total = query.count()
-    records = query.order_by(Transaction.id.desc()).offset(skip).limit(limit).all()
+    records = (
+        query.options(joinedload(Transaction.l1_category), joinedload(Transaction.l2_category))
+        .order_by(Transaction.id.desc())
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
 
     return {"total": total, "skip": skip, "limit": limit, "data": [r.to_dict() for r in records]}
 
@@ -354,7 +393,12 @@ EXPORT_HEADERS = [
 
 @router.get("/export-transactions", summary="Export transactions as CSV")
 async def export_transactions(db: Session = Depends(get_db)):
-    transactions = db.query(Transaction).order_by(Transaction.id.asc()).all()
+    transactions = (
+        db.query(Transaction)
+        .options(joinedload(Transaction.l1_category), joinedload(Transaction.l2_category))
+        .order_by(Transaction.id.asc())
+        .all()
+    )
     if not transactions:
         raise HTTPException(status_code=404, detail="No transactions to export")
 
@@ -410,7 +454,14 @@ async def import_transactions(
     """
     from app.services.csv_service import compute_derived_fields, parse_csv_content, parse_float
 
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="No filename provided")
+
     content = await file.read()
+    max_size_bytes = settings.MAX_FILE_SIZE_MB * 1024 * 1024
+    if len(content) > max_size_bytes:
+        raise HTTPException(status_code=413, detail=f"File too large. Maximum: {settings.MAX_FILE_SIZE_MB}MB")
+
     headers, rows = parse_csv_content(content)
 
     if not rows:

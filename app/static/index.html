@@ -16,6 +16,7 @@
         rel="stylesheet" />
 
     <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
     <script>
         tailwind.config = {
             darkMode: "class",
@@ -26,6 +27,7 @@
                         "background-light": "#f6f7f8",
                         "background-dark": "#101922",
                         "surface-dark": "#1c232d",
+                        "surface-dark-2": "#232d3a",
                         "border-dark": "#2a3441",
                         "text-secondary": "#9dabb9"
                     },
@@ -39,14 +41,41 @@
         .material-symbols-outlined { font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24; }
         .no-scrollbar::-webkit-scrollbar { display: none; }
         .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
-        .filter-popover { display: none; animation: slideDown 0.2s ease-out; }
-        .filter-popover.open { display: block; }
-        @keyframes slideDown { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }
-        .filter-backdrop { display: none; position: fixed; inset: 0; z-index: 14; }
-        .filter-backdrop.open { display: block; }
-        .flatpickr-calendar { z-index: 9999 !important; }
+        .cat-dropdown { position: relative; }
+        .cat-dropdown-menu {
+            display: none; position: absolute; top: 100%; left: 0; right: 0;
+            z-index: 50; max-height: 240px; overflow-y: auto;
+            background: #1c232d; border: 1px solid #2a3441; border-radius: 8px;
+            margin-top: 4px; box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+        }
+        .cat-dropdown-menu.open { display: block; }
+        .cat-dropdown-menu label {
+            display: flex; align-items: center; gap: 8px;
+            padding: 8px 12px; cursor: pointer; font-size: 13px;
+            transition: background 0.15s;
+        }
+        .cat-dropdown-menu label:hover { background: #232d3a; }
+        .chart-card {
+            background: linear-gradient(145deg, #1c232d, #1e2835);
+            border: 1px solid #2a3441; border-radius: 12px; padding: 20px;
+        }
+        /* Pivot table */
+        .pivot-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        .pivot-table th { text-align: right; padding: 8px 12px; font-weight: 600; font-size: 11px;
+            text-transform: uppercase; letter-spacing: 0.05em; color: #9dabb9; border-bottom: 2px solid #2a3441; }
+        .pivot-table th:first-child { text-align: left; }
+        .pivot-table td { padding: 6px 12px; border-bottom: 1px solid #2a344180; }
+        .pivot-table td:not(:first-child) { text-align: right; font-variant-numeric: tabular-nums; }
+        .pivot-l1 { cursor: pointer; transition: background 0.15s; }
+        .pivot-l1:hover { background: #232d3a; }
+        .pivot-l1 td { font-weight: 700; }
+        .pivot-l2 { cursor: pointer; background: #161e28; transition: background 0.15s; }
+        .pivot-l2:hover { background: #232d3a; }
+        .pivot-l2 td { padding-left: 28px !important; font-weight: 400; color: #c5d0db; }
+        .pivot-grand td { font-weight: 800; border-top: 2px solid #2a3441; border-bottom: none;
+            padding-top: 10px; padding-bottom: 10px; }
+        .pivot-hidden { display: none; }
     </style>
-    <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
 </head>
 
 <body class="bg-background-light dark:bg-background-dark text-gray-900 dark:text-white font-display">
@@ -54,15 +83,27 @@
 
     <script>
         const API_BASE = '/api';
-        let selectedFile = null;
         const PAGE_SIZE = 100;
+
+        Chart.defaults.color = '#9dabb9';
+        Chart.defaults.borderColor = '#2a3441';
+        Chart.defaults.font.family = 'Manrope, sans-serif';
+
+        const CHART_COLORS = [
+            '#137fec', '#22c55e', '#ef4444', '#eab308', '#a855f7',
+            '#ec4899', '#06b6d4', '#f97316', '#84cc16', '#6366f1',
+            '#14b8a6', '#f43f5e', '#8b5cf6', '#10b981', '#f59e0b'
+        ];
+
         const appState = {
-            filters: { status: '', accountName: '', accountType: '', l1CategoryId: '', dateFrom: '', dateTo: '' },
+            filters: { status: '', filename: '', accountName: '', accountType: '', categories: [], l1CategoryId: '', l2CategoryId: '', dateFrom: '', dateTo: '', search: '' },
             currentRequestToken: 0,
             loadedTransactions: [],
             totalTransactions: 0,
             currentSkip: 0,
-            categories: [],  // cached [{id, name, level, parent_id, domain, children: [...]}]
+            categories: [], // cached categories
+            analyticsCharts: {},
+            analyticsMeta: null,
         };
 
         const api = {
@@ -73,15 +114,18 @@
                 const res = await fetch(`${API_BASE}/upload-csv`, { method: 'POST', body: formData });
                 return res.json();
             },
-            async getTransactions(status, filename, accountName, accountType, l1CategoryId, skip, limit, dateFrom, dateTo) {
+            async getTransactions(status, filename, accountName, accountType, l1CategoryId, skip, limit, dateFrom, dateTo, search, l2CategoryId, categories) {
                 let url = `${API_BASE}/transactions?skip=${skip || 0}&limit=${limit || PAGE_SIZE}`;
-                if (status) url += `&status_filter=${status}`;
+                if (status) url += `&status_filter=${encodeURIComponent(status)}`;
                 if (filename) url += `&filename_filter=${encodeURIComponent(filename)}`;
                 if (accountName) url += `&account_name=${encodeURIComponent(accountName)}`;
                 if (accountType) url += `&account_type=${encodeURIComponent(accountType)}`;
                 if (l1CategoryId) url += `&l1_category_id=${encodeURIComponent(l1CategoryId)}`;
+                if (l2CategoryId) url += `&l2_category_id=${encodeURIComponent(l2CategoryId)}`;
                 if (dateFrom) url += `&date_from=${encodeURIComponent(dateFrom)}`;
                 if (dateTo) url += `&date_to=${encodeURIComponent(dateTo)}`;
+                if (search) url += `&search=${encodeURIComponent(search)}`;
+                if (categories) url += `&categories=${encodeURIComponent(categories)}`;
                 const res = await fetch(url);
                 return res.json();
             },
@@ -109,9 +153,17 @@
             async updateCategory(id, data) { return (await fetch(`${API_BASE}/categories/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) })).json(); },
             async deleteCategory(id) { const r = await fetch(`${API_BASE}/categories/${id}`, { method: 'DELETE' }); return r.status === 204 ? { success: true } : r.json(); },
             async getMerchantSuggestion(id) { return (await fetch(`${API_BASE}/merchant-suggestion/${id}`)).json(); },
+            async getAnalyticsDashboard(dateFrom, dateTo, accountType, categories) {
+                let url = `${API_BASE}/analytics/dashboard?`;
+                if (dateFrom) url += `date_from=${encodeURIComponent(dateFrom)}&`;
+                if (dateTo) url += `date_to=${encodeURIComponent(dateTo)}&`;
+                if (accountType) url += `account_type=${encodeURIComponent(accountType)}&`;
+                if (categories && categories.length) url += `categories=${encodeURIComponent(categories.join(','))}&`;
+                return (await fetch(url)).json();
+            }
         };
 
-        // Load categories once on startup
+        // Load categories on startup
         async function loadCategories() {
             try { appState.categories = await api.getCategories(); } catch (e) { console.error(e); }
         }
@@ -123,6 +175,34 @@
             return cat ? (cat.children || []) : [];
         }
 
+        function esc(str) {
+            if (!str) return '';
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+        function fmt(n) {
+            return '\u20B9' + Math.abs(n).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        }
+        function fmtMonth(m) {
+            const [y, mo] = m.split('-');
+            const names = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+            return names[parseInt(mo) - 1] + ' ' + y.slice(2);
+        }
+        function generateMonthOptions(years) {
+            const months = [];
+            const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+            for (const y of [...years].sort()) {
+                for (let m = 1; m <= 12; m++) {
+                    months.push({ value: `${y}-${String(m).padStart(2,'0')}`, label: `${monthNames[m-1]} ${y}` });
+                }
+            }
+            return months;
+        }
+
         const router = {
             currentRoute: 'home', params: {},
             navigate(route, params = {}) { this.currentRoute = route; this.params = params; this.render(); },
@@ -131,8 +211,9 @@
                 switch (this.currentRoute) {
                     case 'home': app.innerHTML = screens.home(); screens.initHome(); break;
                     case 'upload': app.innerHTML = screens.upload(); screens.initUpload(); break;
-                    case 'files': app.innerHTML = screens.files(); screens.initFiles(); break;
-                    case 'list': app.innerHTML = screens.list(); screens.initList(); break;
+                    case 'records': app.innerHTML = screens.records(); screens.initRecords(); break;
+                    case 'analytics': app.innerHTML = screens.analytics(); screens.initAnalytics(); break;
+                    case 'budgets': app.innerHTML = screens.budgets(); screens.initBudgets(); break;
                     case 'details': app.innerHTML = screens.details(this.params.id); screens.initDetails(this.params.id); break;
                     case 'addExpense': app.innerHTML = screens.addExpense(); screens.initAddExpense(); break;
                     case 'settings': app.innerHTML = screens.settings(); screens.initSettings(); break;
@@ -151,15 +232,13 @@
                     </button>`;
                 return `
                 <nav class="fixed bottom-0 left-0 right-0 bg-surface-dark border-t border-border-dark z-50">
-                    <div class="flex justify-around py-2">
+                    <div class="flex justify-around py-2 max-w-6xl mx-auto">
                         ${navItem('home', 'home', 'Home')}
-                        ${navItem('files', 'folder', 'Files')}
+                        ${navItem('records', 'receipt_long', 'Records')}
                         ${navItem('accounts', 'account_balance', 'Accounts')}
                         ${navItem('categories', 'category', 'Categories')}
-                        <a href="/analytics" class="flex flex-col items-center p-2 text-text-secondary hover:text-primary">
-                            <span class="material-symbols-outlined">insights</span><span class="text-xs mt-1">Analytics</span>
-                        </a>
-                        ${navItem('settings', 'settings', 'Settings')}
+                        ${navItem('analytics', 'insights', 'Analytics')}
+                        ${navItem('budgets', 'savings', 'Budgets')}
                     </div>
                 </nav>`;
             },
@@ -167,17 +246,36 @@
             // ─── Home ─────────────────────────────────────────────────────────
             home() {
                 return `
-                <div class="flex flex-col min-h-screen pb-16">
+                <div class="flex flex-col min-h-screen pb-16 max-w-6xl mx-auto w-full">
                     <header class="flex items-center justify-between p-4 border-b border-border-dark">
                         <h1 class="text-xl font-bold">Expense Tracker</h1>
-                        <button onclick="screens.exportReviewed()" class="flex items-center gap-1.5 h-9 px-3 rounded-lg bg-green-600 hover:bg-green-700 text-white text-sm font-semibold">
-                            <span class="material-symbols-outlined text-lg">download</span><span>Export</span>
-                        </button>
+                        <div class="flex items-center gap-2">
+                            <button onclick="router.navigate('settings')" class="p-2 rounded-lg bg-surface-dark hover:bg-gray-700 text-text-secondary hover:text-white border border-border-dark flex items-center justify-center transition-colors" title="Settings">
+                                <span class="material-symbols-outlined text-lg">settings</span>
+                            </button>
+                            <button onclick="router.navigate('upload')" class="flex items-center gap-1 h-9 px-3 rounded-lg bg-surface-dark hover:bg-gray-700 text-white text-sm font-semibold border border-border-dark">
+                                <span class="material-symbols-outlined text-lg">upload_file</span><span>Upload</span>
+                            </button>
+                            <button onclick="screens.exportReviewed()" class="flex items-center gap-1 h-9 px-3 rounded-lg bg-green-600 hover:bg-green-700 text-white text-sm font-semibold">
+                                <span class="material-symbols-outlined text-lg">download</span><span>Export</span>
+                            </button>
+                        </div>
                     </header>
-                    <main class="flex-1 p-4 space-y-4">
+                    <main class="flex-1 p-4 space-y-5">
                         <div id="statsGrid" class="grid grid-cols-2 gap-3">
-                            <div class="bg-surface-dark p-4 rounded-xl"><p class="text-text-secondary text-sm">Pending</p><p id="statPending" class="text-2xl font-bold text-yellow-500">-</p></div>
-                            <div class="bg-surface-dark p-4 rounded-xl"><p class="text-text-secondary text-sm">Reviewed</p><p id="statReviewed" class="text-2xl font-bold text-green-500">-</p></div>
+                            <div class="bg-surface-dark p-4 rounded-xl border border-border-dark"><p class="text-text-secondary text-sm font-medium">Pending Review</p><p id="statPending" class="text-2xl font-extrabold text-yellow-500 mt-1">-</p></div>
+                            <div class="bg-surface-dark p-4 rounded-xl border border-border-dark"><p class="text-text-secondary text-sm font-medium">Reviewed</p><p id="statReviewed" class="text-2xl font-extrabold text-green-500 mt-1">-</p></div>
+                        </div>
+
+                        <!-- Uploaded Files Section -->
+                        <div class="space-y-3">
+                            <div class="flex items-center justify-between">
+                                <h2 class="text-lg font-bold">Uploaded Statement Files</h2>
+                                <button onclick="router.navigate('upload')" class="text-xs text-primary font-bold hover:underline">+ Upload New</button>
+                            </div>
+                            <div id="homeFilesList" class="space-y-3">
+                                <div class="flex justify-center py-8"><div class="size-8 border-2 border-primary/30 border-t-primary rounded-full animate-spin"></div></div>
+                            </div>
                         </div>
                     </main>
                     ${this.renderNav('home')}
@@ -189,6 +287,40 @@
                     const t = data.tables.find(t => t.name === 'transactions');
                     if (t) { document.getElementById('statPending').textContent = t.pending || 0; document.getElementById('statReviewed').textContent = t.reviewed || 0; }
                 } catch (e) { console.error(e); }
+
+                const filesList = document.getElementById('homeFilesList');
+                try {
+                    const data = await api.getUploadedFiles();
+                    if (!data.files || !data.files.length) {
+                        filesList.innerHTML = '<div class="bg-surface-dark p-6 rounded-xl border border-border-dark text-center text-text-secondary"><p class="text-sm">No statement files uploaded yet</p></div>';
+                        return;
+                    }
+                    filesList.innerHTML = data.files.map(f => `
+                        <div class="bg-surface-dark p-4 rounded-xl border border-border-dark">
+                            <div class="flex justify-between items-start mb-2">
+                                <div class="flex items-center gap-2 truncate flex-1 pr-2">
+                                    <span class="material-symbols-outlined text-primary">description</span>
+                                    <p class="font-bold truncate">${f.filename}</p>
+                                </div>
+                                <button onclick="screens.deleteFileHome('${f.filename.replace(/'/g, "\\'")}')" class="p-1 text-text-secondary hover:text-red-500 rounded"><span class="material-symbols-outlined text-lg">delete</span></button>
+                            </div>
+                            <div class="flex items-center gap-4 text-xs font-semibold mb-3">
+                                <span class="px-2.5 py-1 rounded bg-yellow-900/30 text-yellow-400">${f.pending_count} pending</span>
+                                <span class="px-2.5 py-1 rounded bg-green-900/30 text-green-400">${f.reviewed_count} reviewed</span>
+                            </div>
+                            <button onclick="screens.viewFileRecords('${f.filename.replace(/'/g, "\\'")}')" class="w-full h-9 bg-primary/20 hover:bg-primary/30 text-primary font-bold text-sm rounded-lg border border-primary/40 flex items-center justify-center gap-1 transition-colors">
+                                <span class="material-symbols-outlined text-sm">visibility</span> View Transactions
+                            </button>
+                        </div>`).join('');
+                } catch (e) { filesList.innerHTML = '<p class="text-center text-red-500 py-4">Failed to load files</p>'; }
+            },
+            viewFileRecords(filename) {
+                appState.filters.filename = filename;
+                router.navigate('records');
+            },
+            async deleteFileHome(filename) {
+                if (!confirm(`Delete all records for "${filename}"?`)) return;
+                try { const r = await api.deleteFile(filename); if (r.success) { this.initHome(); } } catch (e) { alert(e.message); }
             },
             async exportReviewed() {
                 try {
@@ -202,10 +334,10 @@
                 } catch (e) { alert('Export failed: ' + e.message); }
             },
 
-            // ─── Upload ───────────────────────────────────────────────────────
+            // ─── Upload CSV ───────────────────────────────────────────────────
             upload() {
                 return `
-                <div class="flex flex-col min-h-screen">
+                <div class="flex flex-col min-h-screen max-w-6xl mx-auto w-full">
                     <header class="flex items-center p-4 border-b border-border-dark">
                         <button onclick="router.navigate('home')" class="p-2 -ml-2 rounded-full hover:bg-gray-700"><span class="material-symbols-outlined">arrow_back</span></button>
                         <h1 class="text-lg font-bold ml-2">Upload CSV</h1>
@@ -238,129 +370,900 @@
                 document.getElementById('uploadProgress').classList.remove('hidden');
                 try {
                     const result = await api.uploadCSV(file, document.getElementById('accountName').value);
-                    if (result.success) { alert(`Uploaded ${result.rows_inserted} rows`); router.navigate('files'); }
+                    if (result.success) { alert(`Uploaded ${result.rows_inserted} rows`); router.navigate('home'); }
                     else { alert('Failed: ' + (result.detail || 'Unknown')); document.getElementById('dropZone').classList.remove('hidden'); document.getElementById('uploadProgress').classList.add('hidden'); }
                 } catch (e) { alert('Failed: ' + e.message); document.getElementById('dropZone').classList.remove('hidden'); document.getElementById('uploadProgress').classList.add('hidden'); }
             },
 
-            // ─── Files ────────────────────────────────────────────────────────
-            files() {
+            // ─── Records Screen ───────────────────────────────────────────────
+            records() {
+                const { status, search, filename } = appState.filters;
                 return `
-                <div class="flex flex-col min-h-screen pb-16">
-                    <header class="flex items-center p-4 border-b border-border-dark"><h1 class="text-lg font-bold">Uploaded Files</h1></header>
-                    <main id="filesList" class="flex-1 p-4 space-y-3 pb-20"><div class="flex justify-center py-8"><div class="size-8 border-2 border-primary/30 border-t-primary rounded-full animate-spin"></div></div></main>
-                    <button onclick="router.navigate('addExpense')" class="fixed bottom-20 right-4 w-14 h-14 bg-primary text-white rounded-full shadow-lg flex items-center justify-center z-10"><span class="material-symbols-outlined text-3xl">add</span></button>
-                    ${this.renderNav('files')}
-                </div>`;
-            },
-            async initFiles() {
-                const list = document.getElementById('filesList');
-                try {
-                    const data = await api.getUploadedFiles();
-                    if (!data.files.length) { list.innerHTML = '<p class="text-center text-text-secondary py-8">No files uploaded yet</p>'; return; }
-                    list.innerHTML = data.files.map(f => `
-                        <div class="bg-surface-dark p-4 rounded-xl">
-                            <div class="flex justify-between items-start mb-2">
-                                <p class="font-bold truncate flex-1">${f.filename}</p>
-                                <button onclick="screens.deleteFile('${f.filename.replace(/'/g, "\\'")}')" class="p-2 text-red-500 hover:bg-red-900/20 rounded-full"><span class="material-symbols-outlined">delete</span></button>
+                <div class="flex flex-col min-h-screen pb-16 max-w-6xl mx-auto w-full">
+                    <header class="sticky top-0 z-20 bg-background-dark border-b border-border-dark space-y-3 p-4">
+                        <div class="flex items-center justify-between gap-2">
+                            <div class="flex items-center gap-2">
+                                <h1 class="text-lg font-bold truncate">${filename ? 'File: ' + filename : 'Records'}</h1>
+                                ${filename ? `<button onclick="appState.filters.filename=''; screens.initRecords();" class="text-xs text-primary font-bold hover:underline">(Show All)</button>` : ''}
                             </div>
-                            <div class="flex items-center gap-4 text-sm"><span class="text-yellow-500">${f.pending_count} pending</span><span class="text-green-500">${f.reviewed_count} reviewed</span></div>
-                            <button onclick="selectedFile='${f.filename.replace(/'/g, "\\'")}'; router.navigate('list')" class="mt-3 w-full h-10 bg-primary text-white font-bold rounded-lg">View Transactions</button>
-                        </div>`).join('');
-                } catch (e) { list.innerHTML = '<p class="text-center text-red-500 py-8">Failed to load</p>'; }
-            },
-            async deleteFile(filename) {
-                if (!confirm(`Delete all records for "${filename}"?`)) return;
-                try { const r = await api.deleteFile(filename); if (r.success) { alert(r.message); this.initFiles(); } } catch (e) { alert(e.message); }
-            },
-
-            // ─── Transaction List ─────────────────────────────────────────────
-            list() {
-                const { status } = appState.filters;
-                return `
-                <div class="flex flex-col min-h-screen pb-16">
-                    <header class="sticky top-0 z-10 bg-background-dark border-b border-border-dark">
-                        <div class="flex items-center p-4">
-                            <button onclick="router.navigate('files')" class="p-2 -ml-2 rounded-full hover:bg-gray-700"><span class="material-symbols-outlined">arrow_back</span></button>
-                            <h1 class="text-lg font-bold ml-2 truncate flex-1">${selectedFile || 'All Transactions'}</h1>
+                            <div id="recFyButtons" class="flex gap-1.5 flex-wrap"></div>
                         </div>
-                        <div class="flex gap-2 px-4 pb-3 overflow-x-auto no-scrollbar">
-                            <button data-filter="" class="filter-chip ${!status ? 'bg-primary text-white' : 'bg-surface-dark border border-gray-700'} shrink-0 h-8 px-4 rounded-full text-sm font-bold">All</button>
-                            <button data-filter="pending" class="filter-chip ${status === 'pending' ? 'bg-primary text-white' : 'bg-surface-dark border border-gray-700'} shrink-0 h-8 px-4 rounded-full text-sm">Pending</button>
-                            <button data-filter="approved" class="filter-chip ${status === 'approved' ? 'bg-primary text-white' : 'bg-surface-dark border border-gray-700'} shrink-0 h-8 px-4 rounded-full text-sm">Reviewed</button>
+
+                        <!-- Search bar -->
+                        <div class="relative">
+                            <span class="material-symbols-outlined absolute left-3 top-2.5 text-text-secondary text-xl">search</span>
+                            <input id="recSearchInput" type="text" value="${search || ''}" placeholder="Search transaction details, raw text, notes..."
+                                class="w-full h-10 pl-10 pr-4 rounded-lg bg-surface-dark border border-border-dark text-sm"
+                                oninput="screens.onRecordsSearchInput(this.value)" />
+                        </div>
+
+                        <!-- Global Filters -->
+                        <div class="flex flex-wrap gap-2 items-end">
+                            <div class="flex-1 min-w-[120px]">
+                                <label class="text-xs text-text-secondary block mb-1">From</label>
+                                <select id="recDateFrom" onchange="screens.onRecordsFilterChange()"
+                                    class="w-full h-8 px-2 rounded-lg bg-surface-dark border border-border-dark text-xs"></select>
+                            </div>
+                            <div class="flex-1 min-w-[120px]">
+                                <label class="text-xs text-text-secondary block mb-1">To</label>
+                                <select id="recDateTo" onchange="screens.onRecordsFilterChange()"
+                                    class="w-full h-8 px-2 rounded-lg bg-surface-dark border border-border-dark text-xs"></select>
+                            </div>
+                            <div class="flex-1 min-w-[160px]">
+                                <label class="text-xs text-text-secondary block mb-1">Account</label>
+                                <div class="flex h-8 rounded-lg overflow-hidden border border-border-dark">
+                                    <button onclick="screens.setRecAccountType('')" id="recAccAll" class="rec-acc-btn flex-1 text-xs font-semibold px-2">All</button>
+                                    <button onclick="screens.setRecAccountType('Savings')" id="recAccSavings" class="rec-acc-btn flex-1 text-xs font-semibold px-2 border-x border-border-dark">Savings</button>
+                                    <button onclick="screens.setRecAccountType('CreditCard')" id="recAccCC" class="rec-acc-btn flex-1 text-xs font-semibold px-2">Credit Card</button>
+                                </div>
+                            </div>
+                            <div class="flex-1 min-w-[140px] cat-dropdown">
+                                <label class="text-xs text-text-secondary block mb-1">Category</label>
+                                <button onclick="screens.toggleRecCatDropdown()" id="recCatBtn"
+                                    class="w-full h-8 px-3 rounded-lg bg-surface-dark border border-border-dark text-xs text-left flex items-center justify-between">
+                                    <span id="recCatLabel" class="truncate">All</span>
+                                    <span class="material-symbols-outlined text-base">expand_more</span>
+                                </button>
+                                <div id="recCatMenu" class="cat-dropdown-menu"></div>
+                            </div>
+                            <button onclick="screens.resetRecordsFilters()" id="recResetBtn"
+                                class="hidden h-8 px-2.5 rounded-lg text-xs font-semibold bg-surface-dark border border-border-dark text-text-secondary hover:text-white flex items-center gap-1">
+                                <span class="material-symbols-outlined text-xs">restart_alt</span>Reset
+                            </button>
+                        </div>
+
+                        <!-- Status Chips -->
+                        <div class="flex gap-2 pt-1 overflow-x-auto no-scrollbar">
+                            <button data-filter="" class="rec-status-chip ${!status ? 'bg-primary text-white' : 'bg-surface-dark border border-border-dark'} shrink-0 h-7 px-3 rounded-full text-xs font-bold">All</button>
+                            <button data-filter="pending" class="rec-status-chip ${status === 'pending' ? 'bg-primary text-white' : 'bg-surface-dark border border-border-dark'} shrink-0 h-7 px-3 rounded-full text-xs font-bold">Pending Review</button>
+                            <button data-filter="approved" class="rec-status-chip ${status === 'approved' ? 'bg-primary text-white' : 'bg-surface-dark border border-border-dark'} shrink-0 h-7 px-3 rounded-full text-xs font-bold">Reviewed</button>
                         </div>
                     </header>
-                    <main id="statementsList" class="flex-1 p-4 space-y-3 pb-20"><div class="flex justify-center py-8"><div class="size-8 border-2 border-primary/30 border-t-primary rounded-full animate-spin"></div></div></main>
+
+                    <main id="recordsList" class="flex-1 p-4 space-y-3 pb-20">
+                        <div class="flex justify-center py-8"><div class="size-8 border-2 border-primary/30 border-t-primary rounded-full animate-spin"></div></div>
+                    </main>
                     <button onclick="router.navigate('addExpense')" class="fixed bottom-20 right-4 w-14 h-14 bg-primary text-white rounded-full shadow-lg flex items-center justify-center z-20"><span class="material-symbols-outlined text-3xl">add</span></button>
-                    ${this.renderNav('list')}
+                    ${this.renderNav('records')}
                 </div>`;
             },
-            async initList() {
-                document.querySelectorAll('.filter-chip').forEach(chip => {
+            _searchTimeout: null,
+            onRecordsSearchInput(val) {
+                clearTimeout(this._searchTimeout);
+                this._searchTimeout = setTimeout(() => {
+                    appState.filters.search = val.trim();
+                    this.loadRecords();
+                }, 300);
+            },
+            async initRecords() {
+                // Setup status chips
+                document.querySelectorAll('.rec-status-chip').forEach(chip => {
                     chip.onclick = () => {
-                        document.querySelectorAll('.filter-chip').forEach(c => { c.classList.remove('bg-primary', 'text-white'); c.classList.add('bg-surface-dark', 'border'); });
+                        document.querySelectorAll('.rec-status-chip').forEach(c => { c.classList.remove('bg-primary', 'text-white'); c.classList.add('bg-surface-dark', 'border'); });
                         chip.classList.add('bg-primary', 'text-white'); chip.classList.remove('bg-surface-dark', 'border');
                         appState.filters.status = chip.dataset.filter;
-                        this.loadStatements();
+                        this.loadRecords();
                     };
                 });
-                await this.loadStatements();
+
+                // Fetch analytics dashboard meta for available dates & categories
+                try {
+                    const dash = await api.getAnalyticsDashboard();
+                    appState.analyticsMeta = dash.filters;
+                    this.populateRecordsFilterUI(dash.filters);
+                } catch (e) { console.error(e); }
+
+                await this.loadRecords();
             },
-            async loadStatements(append = false) {
-                const list = document.getElementById('statementsList');
+            populateRecordsFilterUI(meta) {
+                const years = meta.available_years || [2026, 2025];
+                const allMonths = generateMonthOptions(years);
+
+                const fromSel = document.getElementById('recDateFrom');
+                const toSel = document.getElementById('recDateTo');
+                const curFrom = appState.filters.dateFrom;
+                const curTo = appState.filters.dateTo;
+
+                // Smart Date Filters: Filter "To" options based on "From", and "From" based on "To"
+                const filteredFromMonths = curTo ? allMonths.filter(m => m.value <= curTo) : allMonths;
+                const filteredToMonths = curFrom ? allMonths.filter(m => m.value >= curFrom) : allMonths;
+
+                if (fromSel) {
+                    fromSel.innerHTML = '<option value="">Earliest</option>' + filteredFromMonths.map(m => `<option value="${m.value}">${m.label}</option>`).join('');
+                    if (curFrom) fromSel.value = curFrom;
+                }
+                if (toSel) {
+                    toSel.innerHTML = '<option value="">Latest</option>' + [...filteredToMonths].reverse().map(m => `<option value="${m.value}">${m.label}</option>`).join('');
+                    if (curTo) toSel.value = curTo;
+                }
+
+                // FY buttons
+                const fyContainer = document.getElementById('recFyButtons');
+                if (fyContainer && meta.fy_options) {
+                    fyContainer.innerHTML = meta.fy_options.map(fy => {
+                        const isActive = appState.filters.dateFrom === fy.date_from && appState.filters.dateTo === fy.date_to;
+                        return `<button onclick="screens.setRecFY('${fy.date_from}','${fy.date_to}')"
+                            class="h-6 px-2.5 rounded-full text-xs font-bold transition-all ${isActive ? 'bg-primary text-white' : 'bg-surface-dark border border-border-dark text-text-secondary hover:text-white'}"
+                        >${fy.label}</button>`;
+                    }).join('');
+                }
+
+                // Category dropdown
+                const menu = document.getElementById('recCatMenu');
+                if (menu && meta.available_categories) {
+                    menu.innerHTML = `
+                        <div class="flex items-center justify-between px-3 py-2 border-b border-border-dark">
+                            <button onclick="screens.selectAllRecCategories()" class="text-xs text-primary font-semibold hover:underline">Select All</button>
+                            <button onclick="screens.clearAllRecCategories()" class="text-xs text-text-secondary font-semibold hover:text-white hover:underline">Clear All</button>
+                        </div>
+                    ` + meta.available_categories.map(c => `
+                        <label>
+                            <input type="checkbox" class="rec-cat-cb rounded border-border-dark bg-surface-dark text-primary"
+                                value="${c.name}" ${appState.filters.categories.includes(c.name) ? 'checked' : ''}
+                                onchange="screens.onRecCatChange()">
+                            <span>${c.name}</span>
+                        </label>
+                    `).join('');
+                }
+
+                this.updateRecAccountTypeUI();
+                this.updateRecCatLabel();
+                this.updateRecResetBtn();
+            },
+            setRecFY(from, to) {
+                appState.filters.dateFrom = from;
+                appState.filters.dateTo = to;
+                if (appState.analyticsMeta) this.populateRecordsFilterUI(appState.analyticsMeta);
+                this.loadRecords();
+            },
+            setRecAccountType(type) {
+                appState.filters.accountType = type;
+                this.updateRecAccountTypeUI();
+                this.onRecordsFilterChange();
+            },
+            updateRecAccountTypeUI() {
+                document.querySelectorAll('.rec-acc-btn').forEach(btn => {
+                    btn.classList.remove('bg-primary', 'text-white');
+                    btn.classList.add('bg-surface-dark', 'text-text-secondary');
+                });
+                const type = appState.filters.accountType;
+                const activeId = type === 'Savings' ? 'recAccSavings' : type === 'CreditCard' ? 'recAccCC' : 'recAccAll';
+                const active = document.getElementById(activeId);
+                if (active) { active.classList.add('bg-primary', 'text-white'); active.classList.remove('bg-surface-dark', 'text-text-secondary'); }
+            },
+            toggleRecCatDropdown() {
+                document.getElementById('recCatMenu')?.classList.toggle('open');
+            },
+            onRecCatChange() {
+                appState.filters.categories = [...document.querySelectorAll('.rec-cat-cb:checked')].map(cb => cb.value);
+                this.updateRecCatLabel();
+                this.onRecordsFilterChange();
+            },
+            selectAllRecCategories() {
+                document.querySelectorAll('.rec-cat-cb').forEach(cb => cb.checked = true);
+                this.onRecCatChange();
+            },
+            clearAllRecCategories() {
+                document.querySelectorAll('.rec-cat-cb').forEach(cb => cb.checked = false);
+                this.onRecCatChange();
+            },
+            updateRecCatLabel() {
+                const label = document.getElementById('recCatLabel');
+                if (!label) return;
+                const cats = appState.filters.categories;
+                if (cats.length === 0) label.textContent = 'All';
+                else if (cats.length <= 2) label.textContent = cats.join(', ');
+                else label.textContent = `${cats.length} selected`;
+            },
+            onRecordsFilterChange() {
+                appState.filters.dateFrom = document.getElementById('recDateFrom')?.value || '';
+                appState.filters.dateTo = document.getElementById('recDateTo')?.value || '';
+                if (appState.analyticsMeta) this.populateRecordsFilterUI(appState.analyticsMeta);
+                this.loadRecords();
+            },
+            resetRecordsFilters() {
+                appState.filters.dateFrom = '';
+                appState.filters.dateTo = '';
+                appState.filters.accountType = '';
+                appState.filters.categories = [];
+                appState.filters.search = '';
+                appState.filters.filename = '';
+                const searchInput = document.getElementById('recSearchInput');
+                if (searchInput) searchInput.value = '';
+                if (appState.analyticsMeta) this.populateRecordsFilterUI(appState.analyticsMeta);
+                this.loadRecords();
+            },
+            updateRecResetBtn() {
+                const btn = document.getElementById('recResetBtn');
+                if (!btn) return;
+                const { dateFrom, dateTo, accountType, categories, search, filename } = appState.filters;
+                const has = dateFrom || dateTo || accountType || categories.length > 0 || search || filename;
+                btn.classList.toggle('hidden', !has);
+                btn.classList.toggle('flex', has);
+            },
+            async loadRecords(append = false) {
+                const list = document.getElementById('recordsList');
                 if (!list) return;
-                const { status, accountName, accountType, l1CategoryId, dateFrom, dateTo } = appState.filters;
+                const { status, filename, accountName, accountType, l1CategoryId, dateFrom, dateTo, search, categories } = appState.filters;
                 const requestToken = ++appState.currentRequestToken;
 
                 if (!append) { appState.loadedTransactions = []; appState.currentSkip = 0; list.innerHTML = '<div class="flex justify-center py-8"><div class="size-8 border-2 border-primary/30 border-t-primary rounded-full animate-spin"></div></div>'; }
 
                 try {
-                    const data = await api.getTransactions(status, selectedFile, accountName, accountType, l1CategoryId, appState.currentSkip, PAGE_SIZE, dateFrom, dateTo);
+                    const data = await api.getTransactions(status, filename, accountName, accountType, l1CategoryId, appState.currentSkip, PAGE_SIZE, dateFrom, dateTo, search, null, categories.join(','));
                     if (requestToken !== appState.currentRequestToken) return;
 
                     appState.totalTransactions = data.total;
                     appState.loadedTransactions = append ? [...appState.loadedTransactions, ...data.data] : data.data;
                     appState.currentSkip += data.data.length;
 
-                    if (!appState.loadedTransactions.length) { list.innerHTML = '<p class="text-center text-text-secondary py-8">No transactions found</p>'; return; }
+                    if (!appState.loadedTransactions.length) { list.innerHTML = '<p class="text-center text-text-secondary py-8">No records found</p>'; return; }
 
                     const cards = appState.loadedTransactions.map(t => {
                         const name = t.merchant_name || t.cleaned_details || t.raw_details || 'Transaction';
                         const subtitle = [t.flow_direction, t.account_name].filter(Boolean).join(' • ');
-                        const amtClass = t.debit ? 'text-red-500' : 'text-green-500';
-                        const amtStr = t.debit ? `- ₹${t.debit.toLocaleString()}` : t.credit ? `+ ₹${t.credit.toLocaleString()}` : '₹0';
+                        const amtStr = t.debit ? `- ₹${t.debit.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2})}` : t.credit ? `+ ₹${t.credit.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2})}` : '₹0.00';
+                        const amtClass = t.debit ? 'text-red-400' : t.credit ? 'text-green-400' : 'text-gray-300';
                         return `
-                        <div onclick="router.navigate('details', {id: ${t.id}})" class="bg-surface-dark p-4 rounded-xl cursor-pointer hover:shadow-md transition-shadow">
+                        <div onclick="router.navigate('details', {id: ${t.id}})" class="bg-surface-dark p-4 rounded-xl cursor-pointer hover:border-primary/50 border border-border-dark transition-all">
                             <div class="flex justify-between items-start">
                                 <div class="flex-1 min-w-0 mr-3">
-                                    <p class="font-bold truncate capitalize">${name}</p>
-                                    ${subtitle ? `<p class="text-xs text-text-secondary truncate">${subtitle}</p>` : ''}
-                                    <p class="text-sm ${amtClass}">${amtStr}</p>
+                                    <p class="font-bold truncate capitalize">${esc(name)}</p>
+                                    ${subtitle ? `<p class="text-xs text-text-secondary truncate mt-0.5">${esc(subtitle)}</p>` : ''}
+                                    <p class="text-sm font-bold mt-1 ${amtClass}">${amtStr}</p>
                                 </div>
                                 <div class="text-right shrink-0">
-                                    <span class="px-2 py-1 rounded text-xs font-bold ${t.review_status !== 'pending' ? 'bg-green-900/30 text-green-400' : 'bg-yellow-900/30 text-yellow-400'}">${t.review_status}</span>
-                                    <p class="text-xs text-gray-400 mt-1">${t.parsed_date || t.raw_date || ''}</p>
+                                    <span class="px-2 py-1 rounded text-xs font-bold ${t.review_status !== 'pending' ? 'bg-green-900/30 text-green-400' : 'bg-yellow-900/30 text-yellow-400'}">${esc(t.review_status)}</span>
+                                    <p class="text-xs text-gray-400 mt-1">${esc(t.parsed_date || t.raw_date || '')}</p>
                                 </div>
                             </div>
                         </div>`;
                     }).join('');
 
                     const hasMore = appState.loadedTransactions.length < appState.totalTransactions;
-                    const footer = `<div class="py-4 text-center"><p class="text-text-secondary text-sm mb-2">Showing ${appState.loadedTransactions.length} of ${appState.totalTransactions}</p>${hasMore ? `<button onclick="screens.loadStatements(true)" class="h-10 px-6 bg-primary text-white font-bold text-sm rounded-lg">Load More</button>` : ''}</div>`;
+                    const footer = `<div class="py-4 text-center"><p class="text-text-secondary text-sm mb-2">Showing ${appState.loadedTransactions.length} of ${appState.totalTransactions}</p>${hasMore ? `<button onclick="screens.loadRecords(true)" class="h-10 px-6 bg-primary text-white font-bold text-sm rounded-lg">Load More</button>` : ''}</div>`;
                     list.innerHTML = cards + footer;
-                } catch (e) { if (requestToken === appState.currentRequestToken && !append) list.innerHTML = '<p class="text-center text-red-500 py-8">Failed to load</p>'; }
+                } catch (e) { if (requestToken === appState.currentRequestToken && !append) list.innerHTML = '<p class="text-center text-red-500 py-8">Failed to load records</p>'; }
+            },
+
+            // ─── Analytics Screen ─────────────────────────────────────────────
+            analytics() {
+                return `
+                <div class="flex flex-col min-h-screen pb-16 max-w-6xl mx-auto w-full">
+                    <header class="p-4 border-b border-border-dark flex items-center justify-between">
+                        <h1 class="text-xl font-bold">Analytics</h1>
+                        <div id="anFyButtons" class="flex gap-1.5 flex-wrap"></div>
+                    </header>
+
+                    <!-- Filter Bar -->
+                    <div id="anFilterBar" class="p-4 border-b border-border-dark space-y-3 bg-surface-dark/30">
+                        <div class="flex items-center justify-between">
+                            <p class="text-xs text-text-secondary font-medium uppercase tracking-wide">Filters</p>
+                            <button onclick="screens.resetAnalyticsFilters()" id="anResetBtn"
+                                class="hidden h-6 px-2.5 rounded-full text-xs font-semibold bg-surface-dark border border-border-dark text-text-secondary hover:text-white flex items-center gap-1">
+                                <span class="material-symbols-outlined text-xs">restart_alt</span>Reset
+                            </button>
+                        </div>
+                        <div class="flex flex-wrap gap-3 items-end">
+                            <div class="flex-1 min-w-[130px]">
+                                <label class="text-xs text-text-secondary block mb-1">From</label>
+                                <select id="anDateFrom" onchange="screens.onAnalyticsFilterChange()"
+                                    class="w-full h-9 px-3 rounded-lg bg-surface-dark border border-border-dark text-sm"></select>
+                            </div>
+                            <div class="flex-1 min-w-[130px]">
+                                <label class="text-xs text-text-secondary block mb-1">To</label>
+                                <select id="anDateTo" onchange="screens.onAnalyticsFilterChange()"
+                                    class="w-full h-9 px-3 rounded-lg bg-surface-dark border border-border-dark text-sm"></select>
+                            </div>
+                            <div class="flex-1 min-w-[180px]">
+                                <label class="text-xs text-text-secondary block mb-1">Account</label>
+                                <div class="flex h-9 rounded-lg overflow-hidden border border-border-dark">
+                                    <button onclick="screens.setAnAccountType('')" id="anAccAll" class="an-acc-btn flex-1 text-sm font-semibold px-2">All</button>
+                                    <button onclick="screens.setAnAccountType('Savings')" id="anAccSavings" class="an-acc-btn flex-1 text-sm font-semibold px-2 border-x border-border-dark">Savings</button>
+                                    <button onclick="screens.setAnAccountType('CreditCard')" id="anAccCC" class="an-acc-btn flex-1 text-sm font-semibold px-2">Credit Card</button>
+                                </div>
+                            </div>
+                            <div class="flex-1 min-w-[180px] cat-dropdown">
+                                <label class="text-xs text-text-secondary block mb-1">Categories</label>
+                                <button onclick="screens.toggleAnCatDropdown()" id="anCatBtn"
+                                    class="w-full h-9 px-3 rounded-lg bg-surface-dark border border-border-dark text-sm text-left flex items-center justify-between">
+                                    <span id="anCatLabel" class="truncate">All</span>
+                                    <span class="material-symbols-outlined text-base">expand_more</span>
+                                </button>
+                                <div id="anCatMenu" class="cat-dropdown-menu"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <main id="analyticsContent" class="flex-1 p-4 space-y-4">
+                        <div class="flex justify-center py-16"><div class="w-8 h-8 border-2 border-primary/30 border-t-primary rounded-full animate-spin"></div></div>
+                    </main>
+                    ${this.renderNav('analytics')}
+
+                    <!-- Pivot Drill-down Modal -->
+                    <div id="pivotModal" class="fixed inset-0 bg-black/70 items-center justify-center z-50 hidden p-4">
+                        <div class="bg-surface-dark rounded-xl border border-border-dark w-full max-w-2xl max-h-[85vh] flex flex-col shadow-2xl">
+                            <div class="flex items-center justify-between p-4 border-b border-border-dark">
+                                <div>
+                                    <h2 id="pivotModalTitle" class="text-lg font-bold text-white">Sub-category Transactions</h2>
+                                    <p id="pivotModalSubtitle" class="text-xs text-text-secondary mt-0.5"></p>
+                                </div>
+                                <button onclick="screens.closePivotModal()" class="p-2 text-text-secondary hover:text-white rounded-full"><span class="material-symbols-outlined">close</span></button>
+                            </div>
+                            <div id="pivotModalList" class="flex-1 overflow-y-auto p-4 space-y-2">
+                                <div class="flex justify-center py-8"><div class="size-8 border-2 border-primary/30 border-t-primary rounded-full animate-spin"></div></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>`;
+            },
+            async initAnalytics() {
+                this.destroyAnalyticsCharts();
+                await this.loadAnalyticsData();
+            },
+            destroyAnalyticsCharts() {
+                Object.values(appState.analyticsCharts).forEach(c => c.destroy());
+                appState.analyticsCharts = {};
+            },
+            async loadAnalyticsData() {
+                const content = document.getElementById('analyticsContent');
+                if (!content) return;
+                content.innerHTML = '<div class="flex justify-center py-16"><div class="w-8 h-8 border-2 border-primary/30 border-t-primary rounded-full animate-spin"></div></div>';
+
+                const { dateFrom, dateTo, accountType, categories } = appState.filters;
+                try {
+                    const data = await api.getAnalyticsDashboard(dateFrom, dateTo, accountType, categories);
+                    appState.analyticsMeta = data.filters;
+                    this.populateAnalyticsFilterUI(data.filters);
+                    this.destroyAnalyticsCharts();
+                    this.renderAnalyticsDashboard(content, data);
+                } catch (e) {
+                    content.innerHTML = `<div class="text-center py-16 text-red-400"><p class="font-bold">Failed to load analytics</p><p class="text-sm mt-1">${e.message}</p></div>`;
+                }
+            },
+            populateAnalyticsFilterUI(meta) {
+                const years = meta.available_years || [2026, 2025];
+                const allMonths = generateMonthOptions(years);
+
+                const fromSel = document.getElementById('anDateFrom');
+                const toSel = document.getElementById('anDateTo');
+                const curFrom = appState.filters.dateFrom;
+                const curTo = appState.filters.dateTo;
+
+                // Smart Date Filters
+                const filteredFromMonths = curTo ? allMonths.filter(m => m.value <= curTo) : allMonths;
+                const filteredToMonths = curFrom ? allMonths.filter(m => m.value >= curFrom) : allMonths;
+
+                if (fromSel) {
+                    fromSel.innerHTML = '<option value="">Earliest</option>' + filteredFromMonths.map(m => `<option value="${m.value}">${m.label}</option>`).join('');
+                    if (curFrom) fromSel.value = curFrom;
+                }
+                if (toSel) {
+                    toSel.innerHTML = '<option value="">Latest</option>' + [...filteredToMonths].reverse().map(m => `<option value="${m.value}">${m.label}</option>`).join('');
+                    if (curTo) toSel.value = curTo;
+                }
+
+                // FY buttons
+                const fyContainer = document.getElementById('anFyButtons');
+                if (fyContainer && meta.fy_options) {
+                    fyContainer.innerHTML = meta.fy_options.map(fy => {
+                        const isActive = appState.filters.dateFrom === fy.date_from && appState.filters.dateTo === fy.date_to;
+                        return `<button onclick="screens.setAnFY('${fy.date_from}','${fy.date_to}')"
+                            class="h-7 px-3 rounded-full text-xs font-bold transition-all ${isActive ? 'bg-primary text-white' : 'bg-surface-dark border border-border-dark text-text-secondary hover:text-white'}"
+                        >${fy.label}</button>`;
+                    }).join('');
+                }
+
+                // Category dropdown
+                const menu = document.getElementById('anCatMenu');
+                if (menu && meta.available_categories) {
+                    menu.innerHTML = `
+                        <div class="flex items-center justify-between px-3 py-2 border-b border-border-dark">
+                            <button onclick="screens.selectAllAnCategories()" class="text-xs text-primary font-semibold hover:underline">Select All</button>
+                            <button onclick="screens.clearAllAnCategories()" class="text-xs text-text-secondary font-semibold hover:text-white hover:underline">Clear All</button>
+                        </div>
+                    ` + meta.available_categories.map(c => `
+                        <label>
+                            <input type="checkbox" class="an-cat-cb rounded border-border-dark bg-surface-dark text-primary"
+                                value="${c.name}" ${appState.filters.categories.includes(c.name) ? 'checked' : ''}
+                                onchange="screens.onAnCatChange()">
+                            <span>${c.name}</span>
+                        </label>
+                    `).join('');
+                }
+
+                this.updateAnAccountTypeUI();
+                this.updateAnCatLabel();
+                this.updateAnResetBtn();
+            },
+            setAnFY(from, to) {
+                appState.filters.dateFrom = from;
+                appState.filters.dateTo = to;
+                if (appState.analyticsMeta) this.populateAnalyticsFilterUI(appState.analyticsMeta);
+                this.loadAnalyticsData();
+            },
+            setAnAccountType(type) {
+                appState.filters.accountType = type;
+                this.updateAnAccountTypeUI();
+                this.onAnalyticsFilterChange();
+            },
+            updateAnAccountTypeUI() {
+                document.querySelectorAll('.an-acc-btn').forEach(btn => {
+                    btn.classList.remove('bg-primary', 'text-white');
+                    btn.classList.add('bg-surface-dark', 'text-text-secondary');
+                });
+                const type = appState.filters.accountType;
+                const activeId = type === 'Savings' ? 'anAccSavings' : type === 'CreditCard' ? 'anAccCC' : 'anAccAll';
+                const active = document.getElementById(activeId);
+                if (active) { active.classList.add('bg-primary', 'text-white'); active.classList.remove('bg-surface-dark', 'text-text-secondary'); }
+            },
+            toggleAnCatDropdown() {
+                document.getElementById('anCatMenu')?.classList.toggle('open');
+            },
+            onAnCatChange() {
+                appState.filters.categories = [...document.querySelectorAll('.an-cat-cb:checked')].map(cb => cb.value);
+                this.updateAnCatLabel();
+                this.onAnalyticsFilterChange();
+            },
+            selectAllAnCategories() {
+                document.querySelectorAll('.an-cat-cb').forEach(cb => cb.checked = true);
+                this.onAnCatChange();
+            },
+            clearAllAnCategories() {
+                document.querySelectorAll('.an-cat-cb').forEach(cb => cb.checked = false);
+                this.onAnCatChange();
+            },
+            updateAnCatLabel() {
+                const label = document.getElementById('anCatLabel');
+                if (!label) return;
+                const cats = appState.filters.categories;
+                if (cats.length === 0) label.textContent = 'All';
+                else if (cats.length <= 2) label.textContent = cats.join(', ');
+                else label.textContent = `${cats.length} selected`;
+            },
+            onAnalyticsFilterChange() {
+                appState.filters.dateFrom = document.getElementById('anDateFrom')?.value || '';
+                appState.filters.dateTo = document.getElementById('anDateTo')?.value || '';
+                if (appState.analyticsMeta) this.populateAnalyticsFilterUI(appState.analyticsMeta);
+                this.loadAnalyticsData();
+            },
+            resetAnalyticsFilters() {
+                appState.filters.dateFrom = '';
+                appState.filters.dateTo = '';
+                appState.filters.accountType = '';
+                appState.filters.categories = [];
+                if (appState.analyticsMeta) this.populateAnalyticsFilterUI(appState.analyticsMeta);
+                this.loadAnalyticsData();
+            },
+            updateAnResetBtn() {
+                const btn = document.getElementById('anResetBtn');
+                if (!btn) return;
+                const { dateFrom, dateTo, accountType, categories } = appState.filters;
+                const has = dateFrom || dateTo || accountType || categories.length > 0;
+                btn.classList.toggle('hidden', !has);
+                btn.classList.toggle('flex', has);
+            },
+            renderAnalyticsDashboard(container, data) {
+                const { kpi, monthly_trend, category_distribution, l2_distribution, cc_reconciliation, account_types, pivot_table, pivot_grand_total } = data;
+
+                container.innerHTML = `
+                    <!-- KPI Cards -->
+                    <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                        <div class="chart-card bg-emerald-950/20 border-emerald-900/30">
+                            <p class="text-xs text-text-secondary font-medium mb-1">Total Income</p>
+                            <p class="text-2xl font-extrabold text-green-400">${fmt(kpi.true_income)}</p>
+                            <p class="text-xs text-text-secondary mt-1">Only L1 category = Income</p>
+                        </div>
+                        <div class="chart-card bg-rose-950/20 border-rose-900/30">
+                            <p class="text-xs text-text-secondary font-medium mb-1">Total Expense</p>
+                            <p class="text-2xl font-extrabold text-red-400">${fmt(kpi.true_expenses)}</p>
+                            <p class="text-xs text-text-secondary mt-1">All categories except Income</p>
+                        </div>
+                        <div class="chart-card bg-blue-950/20 border-blue-900/30">
+                            <p class="text-xs text-text-secondary font-medium mb-1">Net Savings</p>
+                            <p class="text-2xl font-extrabold ${kpi.net_savings >= 0 ? 'text-green-400' : 'text-red-400'}">${kpi.net_savings >= 0 ? '' : '-'}${fmt(kpi.net_savings)}</p>
+                            <p class="text-xs text-text-secondary mt-1">Income - Expense</p>
+                        </div>
+                        <div class="chart-card bg-blue-950/20 border-blue-900/30">
+                            <p class="text-xs text-text-secondary font-medium mb-1">Savings Rate</p>
+                            <p class="text-2xl font-extrabold ${kpi.savings_rate >= 0 ? 'text-green-400' : 'text-red-400'}">${kpi.savings_rate.toFixed(2)}%</p>
+                            <p class="text-xs text-text-secondary mt-1">Net Savings / Income</p>
+                        </div>
+                    </div>
+
+                    <!-- CC Reconciliation -->
+                    <div class="chart-card">
+                        <div class="flex items-center gap-2 mb-3">
+                            <span class="material-symbols-outlined text-lg ${cc_reconciliation.status === 'balanced' ? 'text-green-400' : 'text-yellow-400'}">
+                                ${cc_reconciliation.status === 'balanced' ? 'check_circle' : 'warning'}
+                            </span>
+                            <h3 class="font-bold">CC Bill Reconciliation</h3>
+                            <span class="text-xs px-2 py-0.5 rounded-full font-semibold ${cc_reconciliation.status === 'balanced' ? 'bg-green-900/30 text-green-400' : 'bg-yellow-900/30 text-yellow-400'}">
+                                ${cc_reconciliation.status === 'balanced' ? 'Balanced' : 'Unbalanced'}
+                            </span>
+                        </div>
+                        <div class="grid grid-cols-3 gap-4 text-center">
+                            <div>
+                                <p class="text-xs text-text-secondary mb-1">Paid (Debits)</p>
+                                <p class="text-lg font-bold text-red-400">${fmt(cc_reconciliation.total_debits)}</p>
+                            </div>
+                            <div>
+                                <p class="text-xs text-text-secondary mb-1">Received (Credits)</p>
+                                <p class="text-lg font-bold text-green-400">${fmt(cc_reconciliation.total_credits)}</p>
+                            </div>
+                            <div>
+                                <p class="text-xs text-text-secondary mb-1">Difference</p>
+                                <p class="text-lg font-bold ${Math.abs(cc_reconciliation.difference) < 1 ? 'text-green-400' : 'text-yellow-400'}">
+                                    ${cc_reconciliation.difference >= 0 ? '+' : '-'}${fmt(cc_reconciliation.difference)}
+                                </p>
+                            </div>
+                        </div>
+                        ${Math.abs(cc_reconciliation.difference) >= 1 ? `
+                        <p class="text-xs text-yellow-400/80 mt-3 flex items-center gap-1">
+                            <span class="material-symbols-outlined text-sm">info</span>
+                            Non-zero difference may indicate transactions not recorded on one side
+                        </p>` : ''}
+                    </div>
+
+                    <!-- Pivot Table -->
+                    <div class="chart-card">
+                        <div class="flex items-center justify-between mb-3">
+                            <h3 class="font-bold">Category Pivot Table</h3>
+                            <p class="text-xs text-text-secondary">Click any sub-category to view transactions</p>
+                        </div>
+                        <div class="overflow-x-auto">
+                            <table class="pivot-table" id="pivotTable"></table>
+                        </div>
+                    </div>
+
+                    <!-- Trend Charts -->
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                        <div class="chart-card">
+                            <h3 class="font-bold mb-3">Income vs Expenses</h3>
+                            <div style="height: 280px;"><canvas id="trendBarChart"></canvas></div>
+                        </div>
+                        <div class="chart-card">
+                            <h3 class="font-bold mb-3">Cumulative Cash Flow</h3>
+                            <div style="height: 280px;"><canvas id="cumulativeChart"></canvas></div>
+                        </div>
+                    </div>
+
+                    <!-- Distribution Charts -->
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                        <div class="chart-card">
+                            <h3 class="font-bold mb-3">Category Distribution</h3>
+                            <div class="flex flex-col items-center">
+                                <div style="width: 260px; height: 260px;"><canvas id="categoryDonut"></canvas></div>
+                                <div id="categoryLegend" class="w-full mt-4 space-y-1.5 max-h-48 overflow-y-auto"></div>
+                            </div>
+                        </div>
+                        <div class="chart-card">
+                            <h3 class="font-bold mb-3">Sub-category Breakdown</h3>
+                            <div style="height: ${Math.max(280, l2_distribution.length * 28)}px;"><canvas id="l2Bar"></canvas></div>
+                        </div>
+                    </div>
+                `;
+
+                this.renderTrendBar(monthly_trend);
+                this.renderCumulative(monthly_trend);
+                this.renderCategoryDonut(category_distribution);
+                this.renderL2Bar(l2_distribution);
+                this.renderPivotTable(pivot_table, pivot_grand_total, account_types || ['Savings', 'CreditCard']);
+            },
+            renderPivotTable(pivotData, grandTotal, accountTypes = ['Savings', 'CreditCard']) {
+                appState.currentPivotData = pivotData;
+                const table = document.getElementById('pivotTable');
+                if (!table) return;
+
+                const fmtCell = (v) => '\u20B9' + Math.abs(v || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                const diffColor = (v) => (v || 0) > 0 ? 'text-green-400' : (v || 0) < 0 ? 'text-red-400' : 'text-text-secondary';
+
+                const accountHeader = accountTypes.map(type => `<th colspan="2" class="text-center border-l border-border-dark">${type}</th>`).join('');
+                const valueHeader = accountTypes.map(() => `<th class="amount border-l border-border-dark">Debit</th><th class="amount">Credit</th>`).join('');
+
+                let html = `
+                    <thead>
+                        <tr>
+                            <th rowspan="2" class="text-left">Row Labels</th>
+                            ${accountHeader}
+                            <th rowspan="2" class="amount border-l border-border-dark">Total Debit</th>
+                            <th rowspan="2" class="amount">Total Credit</th>
+                            <th rowspan="2" class="amount">Difference</th>
+                        </tr>
+                        <tr>
+                            ${valueHeader}
+                        </tr>
+                    </thead>
+                    <tbody>`;
+
+                pivotData.forEach((l1, idx) => {
+                    const hasChildren = l1.children && l1.children.length > 0;
+                    const accountCells = accountTypes.map(type => {
+                        const vals = (l1.by_account && l1.by_account[type]) || { debit: 0, credit: 0 };
+                        return `<td class="amount text-red-400/90 border-l border-border-dark">${fmtCell(vals.debit)}</td><td class="amount text-green-400/90">${fmtCell(vals.credit)}</td>`;
+                    }).join('');
+
+                    html += `
+                        <tr class="pivot-l1" onclick="screens.togglePivotChildren(${idx})">
+                            <td class="text-left font-bold">
+                                ${hasChildren ? `<span class="material-symbols-outlined text-sm align-middle mr-1 pivot-arrow" id="pivotArrow${idx}" style="font-size:16px;transition:transform 0.2s">chevron_right</span>` : '<span style="display:inline-block;width:20px"></span>'}
+                                ${l1.name}
+                            </td>
+                            ${accountCells}
+                            <td class="amount text-red-400 font-bold border-l border-border-dark">${fmtCell(l1.total_debit)}</td>
+                            <td class="amount text-green-400 font-bold">${fmtCell(l1.total_credit)}</td>
+                            <td class="amount font-bold ${diffColor(l1.difference)}">${l1.difference >= 0 ? '' : '-'}${fmtCell(l1.difference)}</td>
+                        </tr>`;
+
+                    if (hasChildren) {
+                        l1.children.forEach((l2, l2Idx) => {
+                            const childAccCells = accountTypes.map(type => {
+                                const vals = (l2.by_account && l2.by_account[type]) || { debit: 0, credit: 0 };
+                                return `<td class="amount border-l border-border-dark">${fmtCell(vals.debit)}</td><td class="amount">${fmtCell(vals.credit)}</td>`;
+                            }).join('');
+
+                            html += `
+                                <tr class="pivot-l2 pivot-hidden pivot-child-${idx}" onclick="screens.openPivotDrillDown(${idx}, ${l2Idx})">
+                                    <td class="text-left pl-8">${l2.name}</td>
+                                    ${childAccCells}
+                                    <td class="amount text-red-400/90 border-l border-border-dark">${fmtCell(l2.total_debit)}</td>
+                                    <td class="amount text-green-400/90">${fmtCell(l2.total_credit)}</td>
+                                    <td class="amount ${diffColor(l2.difference)}">${l2.difference >= 0 ? '' : '-'}${fmtCell(l2.difference)}</td>
+                                </tr>`;
+                        });
+                    }
+                });
+
+                const grandAccCells = accountTypes.map(type => {
+                    const vals = (grandTotal.by_account && grandTotal.by_account[type]) || { debit: 0, credit: 0 };
+                    return `<td class="amount text-red-400 border-l border-border-dark">${fmtCell(vals.debit)}</td><td class="amount text-green-400">${fmtCell(vals.credit)}</td>`;
+                }).join('');
+
+                html += `
+                    <tr class="pivot-grand border-t-2 border-border-dark font-extrabold bg-surface-dark-2">
+                        <td class="text-left">Grand Total</td>
+                        ${grandAccCells}
+                        <td class="amount text-red-400 border-l border-border-dark">${fmtCell(grandTotal.total_debit)}</td>
+                        <td class="amount text-green-400">${fmtCell(grandTotal.total_credit)}</td>
+                        <td class="amount ${diffColor(grandTotal.difference)}">${grandTotal.difference >= 0 ? '' : '-'}${fmtCell(grandTotal.difference)}</td>
+                    </tr>`;
+
+                html += '</tbody>';
+                table.innerHTML = html;
+            },
+            togglePivotChildren(idx) {
+                const rows = document.querySelectorAll(`.pivot-child-${idx}`);
+                const arrow = document.getElementById(`pivotArrow${idx}`);
+                const isHidden = rows[0]?.classList.contains('pivot-hidden');
+                rows.forEach(r => r.classList.toggle('pivot-hidden', !isHidden));
+                if (arrow) arrow.style.transform = isHidden ? 'rotate(90deg)' : '';
+            },
+            async openPivotDrillDown(l1Idx, l2Idx) {
+                const modal = document.getElementById('pivotModal');
+                const title = document.getElementById('pivotModalTitle');
+                const subtitle = document.getElementById('pivotModalSubtitle');
+                const list = document.getElementById('pivotModalList');
+
+                const l1Obj = appState.currentPivotData ? appState.currentPivotData[l1Idx] : null;
+                const l2Obj = l1Obj && l1Obj.children ? l1Obj.children[l2Idx] : null;
+                const l1Name = l1Obj ? l1Obj.name : '';
+                const l2Name = l2Obj ? l2Obj.name : '';
+
+                title.textContent = `${l1Name} > ${l2Name}`;
+                subtitle.textContent = `Filtered transactions`;
+                list.innerHTML = '<div class="flex justify-center py-8"><div class="size-8 border-2 border-primary/30 border-t-primary rounded-full animate-spin"></div></div>';
+
+                modal.classList.remove('hidden');
+                modal.classList.add('flex');
+
+                if (!appState.categories || !appState.categories.length) {
+                    try { appState.categories = await api.getCategories(); } catch (e) {}
+                }
+                let l1CatId = null;
+                let l2CatId = null;
+                const l1Cat = (appState.categories || []).find(c => c.name === l1Name);
+                if (l1Cat) {
+                    l1CatId = l1Cat.id;
+                    if (l1Cat.children && l2Name) {
+                        const l2Cat = l1Cat.children.find(c => c.name === l2Name);
+                        if (l2Cat) l2CatId = l2Cat.id;
+                    }
+                }
+
+                try {
+                    const { dateFrom, dateTo, accountType } = appState.filters;
+                    const res = await api.getTransactions(null, null, null, accountType, l1CatId, 0, 200, dateFrom, dateTo, null, l2CatId);
+                    const txns = res.data || [];
+
+                    if (!txns.length) {
+                        list.innerHTML = '<p class="text-center text-text-secondary py-8">No matching transactions found</p>';
+                        return;
+                    }
+
+                    list.innerHTML = txns.map(t => {
+                        const name = t.merchant_name || t.cleaned_details || t.raw_details || 'Transaction';
+                        const subtitleText = [t.flow_direction, t.account_name].filter(Boolean).join(' • ');
+                        const amtStr = t.debit ? `- ₹${t.debit.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2})}` : t.credit ? `+ ₹${t.credit.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2})}` : '₹0.00';
+                        const amtClass = t.debit ? 'text-red-400' : t.credit ? 'text-green-400' : 'text-gray-300';
+                        return `
+                        <div onclick="screens.closePivotModal(); router.navigate('details', {id: ${t.id}})"
+                            class="bg-background-dark p-3.5 rounded-xl cursor-pointer hover:border-primary/50 border border-border-dark flex items-center justify-between transition-all">
+                            <div class="flex-1 min-w-0 mr-3">
+                                <p class="font-bold text-sm truncate capitalize">${esc(name)}</p>
+                                ${subtitleText ? `<p class="text-xs text-text-secondary truncate mt-0.5">${esc(subtitleText)}</p>` : ''}
+                                <p class="text-xs text-gray-400 mt-1">${esc(t.parsed_date || t.raw_date || '')}</p>
+                            </div>
+                            <div class="text-right shrink-0">
+                                <p class="text-sm font-bold ${amtClass}">${amtStr}</p>
+                                <span class="px-2 py-0.5 rounded text-[10px] font-bold ${t.review_status !== 'pending' ? 'bg-green-900/30 text-green-400' : 'bg-yellow-900/30 text-yellow-400'} mt-1 inline-block">${esc(t.review_status)}</span>
+                            </div>
+                        </div>`;
+                    }).join('');
+                } catch (e) {
+                    list.innerHTML = `<p class="text-center text-red-500 py-8">Failed to load transactions: ${e.message}</p>`;
+                }
+            },
+            closePivotModal() {
+                const modal = document.getElementById('pivotModal');
+                if (modal) { modal.classList.add('hidden'); modal.classList.remove('flex'); }
+            },
+            renderTrendBar(trend) {
+                const ctx = document.getElementById('trendBarChart')?.getContext('2d');
+                if (!ctx) return;
+                appState.analyticsCharts.trendBar = new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: trend.map(t => fmtMonth(t.month)),
+                        datasets: [
+                            {
+                                label: 'Income', data: trend.map(t => t.income),
+                                backgroundColor: 'rgba(34, 197, 94, 0.7)', borderColor: '#22c55e',
+                                borderWidth: 1, borderRadius: 4,
+                            },
+                            {
+                                label: 'Expenses', data: trend.map(t => t.expenses),
+                                backgroundColor: 'rgba(239, 68, 68, 0.7)', borderColor: '#ef4444',
+                                borderWidth: 1, borderRadius: 4,
+                            }
+                        ]
+                    },
+                    options: {
+                        responsive: true, maintainAspectRatio: false,
+                        interaction: { intersect: false, mode: 'index' },
+                        plugins: {
+                            legend: { position: 'top', labels: { usePointStyle: true, padding: 12, font: { size: 11 } } },
+                            tooltip: { backgroundColor: '#1c232d', borderColor: '#2a3441', borderWidth: 1,
+                                callbacks: { label: ctx => `${ctx.dataset.label}: ${fmt(ctx.parsed.y)}` } }
+                        },
+                        scales: {
+                            y: { grid: { color: 'rgba(42,52,65,0.5)' }, ticks: { callback: v => fmt(v), font: { size: 10 } } },
+                            x: { grid: { display: false }, ticks: { font: { size: 10 } } }
+                        }
+                    }
+                });
+            },
+            renderCumulative(trend) {
+                const ctx = document.getElementById('cumulativeChart')?.getContext('2d');
+                if (!ctx) return;
+                appState.analyticsCharts.cumulative = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: trend.map(t => fmtMonth(t.month)),
+                        datasets: [{
+                            label: 'Cumulative', data: trend.map(t => t.cumulative),
+                            borderColor: '#137fec', backgroundColor: 'rgba(19, 127, 236, 0.1)',
+                            fill: true, tension: 0.35, pointRadius: 3, pointBackgroundColor: '#137fec', borderWidth: 2,
+                        }]
+                    },
+                    options: {
+                        responsive: true, maintainAspectRatio: false,
+                        plugins: {
+                            legend: { display: false },
+                            tooltip: { backgroundColor: '#1c232d', borderColor: '#2a3441', borderWidth: 1,
+                                callbacks: { label: ctx => `Net: ${ctx.parsed.y >= 0 ? '+' : ''}${fmt(ctx.parsed.y)}` } }
+                        },
+                        scales: {
+                            y: { grid: { color: 'rgba(42,52,65,0.5)' }, ticks: { callback: v => fmt(v), font: { size: 10 } } },
+                            x: { grid: { display: false }, ticks: { font: { size: 10 } } }
+                        }
+                    }
+                });
+            },
+            renderCategoryDonut(categories) {
+                const ctx = document.getElementById('categoryDonut')?.getContext('2d');
+                if (!ctx) return;
+                const colors = categories.map((c, i) => c.color || CHART_COLORS[i % CHART_COLORS.length]);
+                appState.analyticsCharts.donut = new Chart(ctx, {
+                    type: 'doughnut',
+                    data: {
+                        labels: categories.map(c => c.name),
+                        datasets: [{ data: categories.map(c => c.total), backgroundColor: colors, borderColor: '#1c232d', borderWidth: 2 }]
+                    },
+                    options: {
+                        responsive: true, maintainAspectRatio: false, cutout: '65%',
+                        plugins: {
+                            legend: { display: false },
+                            tooltip: { backgroundColor: '#1c232d', borderColor: '#2a3441', borderWidth: 1,
+                                callbacks: { label: ctx => `${ctx.label}: ${fmt(ctx.parsed)} (${categories[ctx.dataIndex]?.percentage || 0}%)` } }
+                        }
+                    }
+                });
+
+                const legend = document.getElementById('categoryLegend');
+                if (legend) {
+                    legend.innerHTML = categories.map((c, i) => `
+                        <div class="flex items-center gap-2 px-2 py-1 rounded hover:bg-surface-dark-2 transition-colors">
+                            <div class="w-2.5 h-2.5 rounded-full shrink-0" style="background:${colors[i]}"></div>
+                            <span class="flex-1 text-sm truncate">${c.name}</span>
+                            <span class="text-sm font-semibold">${fmt(c.total)}</span>
+                            <span class="text-xs text-text-secondary w-10 text-right">${c.percentage}%</span>
+                        </div>
+                    `).join('');
+                }
+            },
+            renderL2Bar(l2data) {
+                const ctx = document.getElementById('l2Bar')?.getContext('2d');
+                if (!ctx || !l2data.length) {
+                    const container = document.getElementById('l2Bar')?.parentElement;
+                    if (container) container.innerHTML = '<p class="text-center text-text-secondary py-8">No sub-category data</p>';
+                    return;
+                }
+                appState.analyticsCharts.l2bar = new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: l2data.map(d => d.name.length > 20 ? d.name.slice(0, 18) + '...' : d.name),
+                        datasets: [{
+                            label: 'Amount', data: l2data.map(d => d.total),
+                            backgroundColor: CHART_COLORS.slice(0, l2data.length).map(c => c + 'BB'),
+                            borderColor: CHART_COLORS.slice(0, l2data.length),
+                            borderWidth: 1, borderRadius: 4,
+                        }]
+                    },
+                    options: {
+                        indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+                        plugins: {
+                            legend: { display: false },
+                            tooltip: { backgroundColor: '#1c232d', borderColor: '#2a3441', borderWidth: 1,
+                                callbacks: { label: ctx => `${fmt(l2data[ctx.dataIndex].total)} (${l2data[ctx.dataIndex].percentage}%)` } }
+                        },
+                        scales: {
+                            x: { grid: { color: 'rgba(42,52,65,0.5)' }, ticks: { callback: v => fmt(v), font: { size: 10 } } },
+                            y: { grid: { display: false }, ticks: { font: { size: 11 } } }
+                        }
+                    }
+                });
             },
 
             // ─── Transaction Details / Review ─────────────────────────────────
             details(id) {
                 return `
-                <div class="flex flex-col min-h-screen">
+                <div class="flex flex-col min-h-screen max-w-6xl mx-auto w-full">
                     <header class="flex items-center p-4 border-b border-border-dark">
-                        <button onclick="router.navigate('list')" class="p-2 -ml-2 rounded-full hover:bg-gray-700"><span class="material-symbols-outlined">arrow_back</span></button>
+                        <button onclick="router.navigate('records')" class="p-2 -ml-2 rounded-full hover:bg-gray-700"><span class="material-symbols-outlined">arrow_back</span></button>
                         <h1 class="text-lg font-bold ml-2">Transaction Details</h1>
                     </header>
                     <main id="detailsContent" class="flex-1 p-4 pb-32"><div class="flex justify-center py-8"><div class="size-8 border-2 border-primary/30 border-t-primary rounded-full animate-spin"></div></div></main>
-                    <footer id="detailsFooter" class="fixed bottom-0 left-0 right-0 p-4 pb-8 bg-background-dark border-t border-border-dark hidden">
+                    <footer id="detailsFooter" class="fixed bottom-0 left-0 right-0 p-4 pb-8 bg-background-dark border-t border-border-dark hidden max-w-6xl mx-auto">
                         <button id="approveBtn" class="w-full h-12 bg-primary text-white font-bold rounded-xl flex items-center justify-center gap-2"><span class="material-symbols-outlined">check</span> Review</button>
                     </footer>
                 </div>`;
@@ -374,26 +1277,26 @@
                     const merchantDisplay = t.merchant_name || t.cleaned_details || null;
                     const notesRequired = suggestion.suggestion?.notes_required || false;
 
-                    const amtClass = t.debit ? 'text-red-500' : 'text-green-500';
-                    const amtStr = t.debit ? `- ₹${t.debit.toLocaleString()}` : t.credit ? `+ ₹${t.credit.toLocaleString()}` : '₹0';
+                    const amtStr = t.debit ? `- ₹${t.debit.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2})}` : t.credit ? `+ ₹${t.credit.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2})}` : '₹0.00';
+                    const amtClass = t.debit ? 'text-red-400' : t.credit ? 'text-green-400' : 'text-gray-300';
 
                     content.innerHTML = `
                         <div class="space-y-4">
-                            <div class="bg-surface-dark p-4 rounded-xl">
-                                ${merchantDisplay ? `<p class="text-xl font-bold capitalize">${merchantDisplay}</p><p class="text-sm text-text-secondary mt-1">${[t.flow_direction, t.account_name].filter(Boolean).join(' • ')}</p>` : `<p class="text-lg font-bold">${t.raw_details || 'Transaction'}</p>`}
+                            <div class="bg-surface-dark p-4 rounded-xl border border-border-dark">
+                                ${merchantDisplay ? `<p class="text-xl font-bold capitalize">${esc(merchantDisplay)}</p><p class="text-sm text-text-secondary mt-1">${esc([t.flow_direction, t.account_name].filter(Boolean).join(' • '))}</p>` : `<p class="text-lg font-bold">${esc(t.raw_details || 'Transaction')}</p>`}
                                 <p class="text-2xl font-bold mt-3 ${amtClass}">${amtStr}</p>
-                                <p class="text-sm text-text-secondary mt-1">${t.parsed_date || t.raw_date || ''}</p>
+                                <p class="text-sm text-text-secondary mt-1">${esc(t.parsed_date || t.raw_date || '')}</p>
                             </div>
 
-                            <details class="bg-surface-dark rounded-xl">
+                            <details class="bg-surface-dark rounded-xl border border-border-dark">
                                 <summary class="p-4 cursor-pointer text-sm font-bold text-text-secondary flex items-center gap-2"><span class="material-symbols-outlined text-base">info</span> Raw Details</summary>
-                                <div class="px-4 pb-4 text-xs font-mono break-all bg-background-dark mx-4 mb-4 p-2 rounded">${t.raw_details || '-'}</div>
+                                <div class="px-4 pb-4 text-xs font-mono break-all bg-background-dark mx-4 mb-4 p-2 rounded">${esc(t.raw_details || '-')}</div>
                             </details>
 
                             <div id="suggestionBanner" class="hidden"></div>
 
-                            <div class="bg-surface-dark p-4 rounded-xl space-y-4">
-                                <h3 class="text-sm font-bold text-text-secondary">Review</h3>
+                            <div class="bg-surface-dark p-4 rounded-xl space-y-4 border border-border-dark">
+                                <h3 class="text-sm font-bold text-text-secondary">Review & Categorize</h3>
                                 <div>
                                     <label class="text-xs text-text-secondary">L1 Category</label>
                                     <select id="reviewL1" class="w-full h-10 px-3 mt-1 rounded-lg border border-border-dark bg-surface-dark text-sm">
@@ -466,20 +1369,20 @@
                     approveBtn.onclick = async () => {
                         if (!l1Select.value) { alert('Please select a category'); return; }
                         const data = { l1_category_id: l1Select.value, l2_category_id: l2Select.value || null, notes: notesInput.value || null, review_status: 'approved' };
-                        try { const r = await api.reviewTransaction(id, data); if (r.success) router.navigate('list'); else alert(r.detail || 'Failed'); } catch (e) { alert(e.message); }
+                        try { const r = await api.reviewTransaction(id, data); if (r.success) router.navigate('records'); else alert(r.detail || 'Failed'); } catch (e) { alert(e.message); }
                     };
 
                     document.getElementById('deleteBtn').onclick = async () => {
                         if (!confirm('Delete this transaction?')) return;
-                        try { const r = await api.deleteTransaction(id); if (r.success) router.navigate('list'); } catch (e) { alert(e.message); }
+                        try { const r = await api.deleteTransaction(id); if (r.success) router.navigate('records'); } catch (e) { alert(e.message); }
                     };
-                } catch (e) { content.innerHTML = '<p class="text-center text-red-500 py-8">Failed to load</p>'; console.error(e); }
+                } catch (e) { content.innerHTML = '<p class="text-center text-red-500 py-8">Failed to load transaction</p>'; console.error(e); }
             },
 
             // ─── Add Manual Expense ───────────────────────────────────────────
             addExpense() {
                 return `
-                <div class="flex flex-col min-h-screen">
+                <div class="flex flex-col min-h-screen max-w-6xl mx-auto w-full">
                     <header class="flex items-center p-4 border-b border-border-dark">
                         <button onclick="router.navigate('home')" class="p-2 -ml-2 rounded-full hover:bg-gray-700"><span class="material-symbols-outlined">arrow_back</span></button>
                         <h1 class="text-lg font-bold ml-2">Add Expense</h1>
@@ -519,14 +1422,14 @@
                         l1_category_id: catSelect.value || null,
                         Notes: document.getElementById('manualNotes').value || null,
                     };
-                    try { const r = await api.createTransaction(data); if (r.success) { alert('Saved!'); router.navigate('home'); } else alert(r.detail || 'Failed'); } catch (e) { alert(e.message); }
+                    try { const r = await api.createTransaction(data); if (r.success) { alert('Saved!'); router.navigate('records'); } else alert(r.detail || 'Failed'); } catch (e) { alert(e.message); }
                 };
             },
 
-            // ─── Categories ───────────────────────────────────────────────────
+            // ─── Categories Screen ────────────────────────────────────────────
             categoriesScreen() {
                 return `
-                <div class="flex flex-col min-h-screen pb-16">
+                <div class="flex flex-col min-h-screen pb-16 max-w-6xl mx-auto w-full">
                     <header class="flex items-center justify-between p-4 border-b border-border-dark">
                         <h1 class="text-lg font-bold">Categories</h1>
                         <button onclick="screens.openCategoryModal()" class="flex items-center gap-1 h-8 px-3 rounded-lg bg-primary text-white text-sm font-semibold">
@@ -569,7 +1472,7 @@
                     const cats = getL1Categories();
                     if (!cats.length) { list.innerHTML = '<p class="text-center text-text-secondary py-8">No categories</p>'; return; }
                     list.innerHTML = cats.map(c => `
-                        <div class="bg-surface-dark p-4 rounded-xl">
+                        <div class="bg-surface-dark p-4 rounded-xl border border-border-dark">
                             <div class="flex items-center gap-3 mb-2">
                                 <div class="w-3 h-3 rounded-full shrink-0" style="background:${c.color_hex || '#666'}"></div>
                                 <p class="font-bold flex-1">${c.name}</p>
@@ -593,7 +1496,7 @@
                                 <span class="material-symbols-outlined text-sm">add</span> Add sub-category
                             </button>`}
                         </div>`).join('');
-                } catch (e) { list.innerHTML = '<p class="text-center text-red-500 py-8">Failed to load</p>'; }
+                } catch (e) { list.innerHTML = '<p class="text-center text-red-500 py-8">Failed to load categories</p>'; }
             },
             openCategoryModal(editId = null, name = null, color = null, level = 1, parentId = null) {
                 this._catEditId = editId;
@@ -656,15 +1559,15 @@
             // ─── Settings ─────────────────────────────────────────────────────
             settings() {
                 return `
-                <div class="flex flex-col min-h-screen pb-16">
+                <div class="flex flex-col min-h-screen pb-16 max-w-6xl mx-auto w-full">
                     <header class="flex items-center p-4 border-b border-border-dark"><h1 class="text-lg font-bold">Settings</h1></header>
                     <main class="flex-1 p-4 space-y-4">
-                        <div class="bg-surface-dark p-4 rounded-xl">
-                            <button onclick="router.navigate('upload')" class="w-full flex items-center gap-4 p-3 rounded-lg hover:bg-gray-700"><span class="material-symbols-outlined text-primary">upload_file</span><div class="text-left"><p class="font-bold">Upload CSV</p><p class="text-sm text-text-secondary">Import bank statement</p></div></button>
+                        <div class="bg-surface-dark p-4 rounded-xl border border-border-dark">
+                            <button onclick="router.navigate('upload')" class="w-full flex items-center gap-4 p-3 rounded-lg hover:bg-gray-700"><span class="material-symbols-outlined text-primary">upload_file</span><div class="text-left"><p class="font-bold">Upload CSV</p><p class="text-sm text-text-secondary">Import bank statement file</p></div></button>
                         </div>
-                        <div class="bg-surface-dark p-4 rounded-xl">
+                        <div class="bg-surface-dark p-4 rounded-xl border border-border-dark">
                             <h3 class="font-bold mb-3 text-red-500">Danger Zone</h3>
-                            <button id="clearBtn" class="w-full h-10 bg-red-900/30 text-red-500 font-bold rounded-lg">Clear All Transactions</button>
+                            <button id="clearBtn" class="w-full h-10 bg-red-900/30 text-red-500 font-bold rounded-lg border border-red-800/50">Clear All Transactions</button>
                         </div>
                     </main>
                     ${this.renderNav('settings')}
@@ -677,10 +1580,10 @@
                 };
             },
 
-            // ─── Accounts ─────────────────────────────────────────────────────
+            // ─── Accounts Screen ──────────────────────────────────────────────
             accounts() {
                 return `
-                <div class="flex flex-col min-h-screen pb-16">
+                <div class="flex flex-col min-h-screen pb-16 max-w-6xl mx-auto w-full">
                     <header class="flex items-center p-4 border-b border-border-dark"><h1 class="text-lg font-bold">Accounts</h1></header>
                     <main id="accountsList" class="flex-1 p-4 space-y-3"><div class="flex justify-center py-8"><div class="size-8 border-2 border-primary/30 border-t-primary rounded-full animate-spin"></div></div></main>
                     <footer class="p-4"><button onclick="screens.openAccountModal()" class="w-full h-12 bg-surface-dark border border-border-dark text-white font-bold rounded-xl flex items-center justify-center gap-2"><span class="material-symbols-outlined">add_circle</span> Add Account</button></footer>
@@ -716,11 +1619,11 @@
                     const data = await api.getAccounts();
                     if (!data.accounts.length) { list.innerHTML = '<p class="text-center text-text-secondary py-8">No accounts yet</p>'; return; }
                     list.innerHTML = data.accounts.map(a => `
-                        <div class="bg-surface-dark p-4 rounded-xl flex items-center justify-between">
+                        <div class="bg-surface-dark p-4 rounded-xl border border-border-dark flex items-center justify-between">
                             <div><p class="font-bold">${a.name}</p><p class="text-sm text-text-secondary">Balance: ₹${a.balance.toLocaleString('en-IN', {minimumFractionDigits: 2})}</p></div>
                             <button onclick="screens.deleteAccountById('${a.id}','${a.name.replace(/'/g, "\\'")}')" class="p-2 text-red-500 hover:bg-red-900/20 rounded-full"><span class="material-symbols-outlined">delete</span></button>
                         </div>`).join('');
-                } catch (e) { list.innerHTML = '<p class="text-center text-red-500 py-8">Failed</p>'; }
+                } catch (e) { list.innerHTML = '<p class="text-center text-red-500 py-8">Failed to load accounts</p>'; }
             },
             openAccountModal(account = null) {
                 this.accountModalState = { editingId: account?.id || null, selectedType: account?.account_type || null };
@@ -751,7 +1654,340 @@
                 if (!confirm(`Delete "${name}"?`)) return;
                 try { const r = await api.deleteAccount(id); if (r.success) this.initAccounts(); } catch (e) { alert(e.message); }
             },
+
+            // ─── Budgets Screen ───────────────────────────────────────────────
+            budgets() {
+                return `
+                <div class="flex flex-col min-h-screen pb-16 max-w-6xl mx-auto w-full">
+                    <header class="flex items-center justify-between p-4 border-b border-border-dark">
+                        <h1 class="text-xl font-bold">Budgets</h1>
+                        <div class="flex items-center gap-3">
+                            <select id="budgetMonthSelect" onchange="screens.onBudgetMonthChange()"
+                                class="h-9 px-3 rounded-lg bg-surface-dark border border-border-dark text-sm"></select>
+                            <button onclick="screens.openNewBudgetModal()" class="flex items-center gap-1 h-9 px-3 rounded-lg bg-primary text-white text-sm font-semibold">
+                                <span class="material-symbols-outlined text-lg">add</span> Add
+                            </button>
+                        </div>
+                    </header>
+
+                    <main class="flex-1 p-4">
+                        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6" id="budgetsGrid">
+                            <!-- Left Column: Monthly Budgets -->
+                            <div class="space-y-4">
+                                <div class="flex items-center justify-between mb-2">
+                                    <h2 class="text-lg font-bold text-primary">Monthly Spend</h2>
+                                    <span class="text-xs text-text-secondary bg-surface-dark px-2.5 py-1 rounded-full font-semibold" id="monthlyPeriodLabel">Current Month</span>
+                                </div>
+                                <div id="monthlyBudgetsList" class="space-y-4">
+                                    <div class="flex justify-center py-8"><div class="size-8 border-2 border-primary/30 border-t-primary rounded-full animate-spin"></div></div>
+                                </div>
+                            </div>
+                            
+                            <!-- Right Column: Yearly Budgets -->
+                            <div class="space-y-4 border-t lg:border-t-0 lg:border-l border-border-dark pt-6 lg:pt-0 lg:pl-6">
+                                <div class="flex items-center justify-between mb-2">
+                                    <h2 class="text-lg font-bold text-green-400">Yearly Spend</h2>
+                                    <span class="text-xs text-text-secondary bg-surface-dark px-2.5 py-1 rounded-full font-semibold" id="yearlyPeriodLabel">Current Year</span>
+                                </div>
+                                <div id="yearlyBudgetsList" class="space-y-4">
+                                    <div class="flex justify-center py-8"><div class="size-8 border-2 border-primary/30 border-t-primary rounded-full animate-spin"></div></div>
+                                </div>
+                            </div>
+                        </div>
+                    </main>
+
+                    <!-- Budget Edit/Create Modal -->
+                    <div id="budgetModal" class="fixed inset-0 bg-black/60 items-center justify-center z-50 hidden">
+                        <div class="bg-surface-dark rounded-xl p-6 w-[90%] max-w-md border border-border-dark">
+                            <h2 id="budgetModalTitle" class="text-lg font-bold mb-4">Edit Budget</h2>
+                            <div class="space-y-4">
+                                <div id="budgetL1SelectWrap">
+                                    <label class="text-xs text-text-secondary">L1 Category</label>
+                                    <select id="budgetL1Name" class="w-full h-10 px-3 mt-1 rounded-lg bg-background-dark border border-border-dark text-sm"></select>
+                                </div>
+                                <div id="budgetL1StaticWrap">
+                                    <label class="text-xs text-text-secondary">L1 Category</label>
+                                    <p id="budgetL1StaticName" class="text-sm font-bold mt-1 px-3 py-2 bg-background-dark rounded-lg border border-border-dark"></p>
+                                </div>
+                                <div>
+                                    <label class="text-xs text-text-secondary">Amount Limit (₹)</label>
+                                    <input id="budgetAmountLimit" type="number" step="0.01" class="w-full h-10 px-3 mt-1 rounded-lg bg-background-dark border border-border-dark text-sm" />
+                                </div>
+                                <div>
+                                    <label class="text-xs text-text-secondary">Period</label>
+                                    <select id="budgetPeriod" class="w-full h-10 px-3 mt-1 rounded-lg bg-background-dark border border-border-dark text-sm">
+                                        <option value="MONTHLY">Monthly</option>
+                                        <option value="WEEKLY">Weekly</option>
+                                        <option value="YEARLY">Yearly</option>
+                                    </select>
+                                </div>
+                                <div class="flex items-center justify-between">
+                                    <label class="text-sm font-medium">Rollover unused budget</label>
+                                    <input id="budgetRollover" type="checkbox" class="rounded border-border-dark bg-background-dark text-primary" />
+                                </div>
+                                <div class="flex items-center justify-between">
+                                    <label class="text-sm font-medium">Active</label>
+                                    <input id="budgetIsActive" type="checkbox" checked class="rounded border-border-dark bg-background-dark text-primary" />
+                                </div>
+                            </div>
+                            <div class="flex gap-3 mt-6">
+                                <button onclick="screens.closeBudgetModal()" class="flex-1 h-10 border border-border-dark rounded-lg font-bold text-sm">Cancel</button>
+                                <button id="budgetSaveBtn" class="flex-1 h-10 bg-primary text-white rounded-lg font-bold text-sm">Save</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    ${this.renderNav('budgets')}
+                </div>`;
+            },
+            budgetState: { editingId: null, currentMonth: null, loadedProgress: [] },
+            async initBudgets() {
+                // Determine active month
+                if (!this.budgetState.currentMonth) {
+                    this.budgetState.currentMonth = new Date().toISOString().slice(0, 7);
+                }
+
+                // Load month dropdown
+                try {
+                    const dash = await api.getAnalyticsDashboard();
+                    const years = dash.filters.available_years || [2026, 2025];
+                    const months = generateMonthOptions(years);
+                    const monthSel = document.getElementById('budgetMonthSelect');
+                    if (monthSel) {
+                        monthSel.innerHTML = months.reverse().map(m => `<option value="${m.value}">${m.label}</option>`).join('');
+                        monthSel.value = this.budgetState.currentMonth;
+                    }
+                } catch (e) { console.error(e); }
+
+                await this.loadBudgetsProgress();
+            },
+            onBudgetMonthChange() {
+                this.budgetState.currentMonth = document.getElementById('budgetMonthSelect').value;
+                this.loadBudgetsProgress();
+            },
+            async loadBudgetsProgress() {
+                const monthlyList = document.getElementById('monthlyBudgetsList');
+                const yearlyList = document.getElementById('yearlyBudgetsList');
+                if (!monthlyList || !yearlyList) return;
+                monthlyList.innerHTML = '<div class="flex justify-center py-8"><div class="size-8 border-2 border-primary/30 border-t-primary rounded-full animate-spin"></div></div>';
+                yearlyList.innerHTML = '<div class="flex justify-center py-8"><div class="size-8 border-2 border-primary/30 border-t-primary rounded-full animate-spin"></div></div>';
+
+                try {
+                    const res = await fetch(`${API_BASE}/budgets/progress?month=${this.budgetState.currentMonth}`);
+                    const data = await res.json();
+                    this.budgetState.loadedProgress = data.progress || [];
+
+                    document.getElementById('monthlyPeriodLabel').textContent = fmtMonth(data.month);
+                    document.getElementById('yearlyPeriodLabel').textContent = data.fy_label;
+
+                    if (!this.budgetState.loadedProgress.length) {
+                        const emptyHtml = '<div class="bg-surface-dark p-6 rounded-xl border border-border-dark text-center text-text-secondary"><p>No budgets configured. Click Add to create one!</p></div>';
+                        monthlyList.innerHTML = emptyHtml;
+                        yearlyList.innerHTML = emptyHtml;
+                        return;
+                    }
+
+                    // Render Monthly List
+                    monthlyList.innerHTML = this.budgetState.loadedProgress.map((b, idx) => {
+                        const m = b.monthly;
+                        const progressPct = Math.min(m.percentage, 100);
+                        // Progress bar colors: Green (<=50%), Orange (51%-80%), Red (>80%)
+                        const barColorClass = m.percentage <= 50 ? 'bg-green-500' : m.percentage <= 80 ? 'bg-yellow-500' : 'bg-red-500';
+                        const isOver = m.left_to_spend < 0;
+                        const leftStr = isOver 
+                            ? `₹${Math.abs(m.left_to_spend).toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2})} overspent of ₹${m.amount_limit.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2})}` 
+                            : `₹${m.left_to_spend.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2})} left of ₹${m.amount_limit.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+
+                        return `
+                        <div class="bg-surface-dark rounded-xl border border-border-dark overflow-hidden transition-all text-left">
+                            <div class="p-4 cursor-pointer hover:bg-surface-dark-2/40" onclick="screens.toggleBudgetL2('monthly', ${idx})">
+                                <div class="flex justify-between items-start mb-2">
+                                    <div>
+                                        <h3 class="font-extrabold text-base flex items-center gap-1.5">
+                                            ${b.l1_category_name}
+                                            ${b.rollover ? '<span class="material-symbols-outlined text-xs text-primary" title="Rollover active">redo</span>' : ''}
+                                        </h3>
+                                        <p class="text-xs text-text-secondary mt-0.5">${leftStr}</p>
+                                    </div>
+                                    <div class="flex items-center gap-2">
+                                        <div class="text-right">
+                                            <p class="font-extrabold text-sm ${isOver ? 'text-red-400' : 'text-text-secondary'}">${m.percentage}%</p>
+                                            <p class="text-[10px] text-text-secondary font-semibold uppercase tracking-wider">${b.period}</p>
+                                        </div>
+                                        <button onclick="event.stopPropagation(); screens.openEditBudgetModal(${b.id}, '${b.l1_category_name.replace(/'/g, "\\'")}', ${m.amount_limit}, ${b.rollover}, '${b.period}')"
+                                            class="p-2 text-text-secondary hover:text-white rounded-lg hover:bg-surface-dark-2">
+                                            <span class="material-symbols-outlined text-base">edit</span>
+                                        </button>
+                                    </div>
+                                </div>
+                                <div class="w-full bg-background-dark rounded-full h-2.5 overflow-hidden">
+                                    <div class="h-full rounded-full ${barColorClass}" style="width: ${progressPct}%"></div>
+                                </div>
+                            </div>
+                            
+                            <!-- L2 Breakdown section -->
+                            <div id="monthlyBudgetL2-${idx}" class="hidden border-t border-border-dark/50 bg-background-dark/30 px-4 py-3 space-y-1.5">
+                                ${m.l2_breakdown.length ? m.l2_breakdown.map(l2 => `
+                                    <div class="flex items-center justify-between text-xs font-semibold py-0.5">
+                                        <span class="text-text-secondary">${l2.name}</span>
+                                        <span>₹${l2.spend.toLocaleString('en-IN', {minimumFractionDigits:2})}</span>
+                                    </div>
+                                `).join('') : '<p class="text-xs text-text-secondary italic text-center py-1">No transaction data in this month</p>'}
+                            </div>
+                        </div>`;
+                    }).join('');
+
+                    // Sort Yearly list by yearly percentage spent (highest first)
+                    const sortedYearlyProgress = [...this.budgetState.loadedProgress].sort((x, y) => y.yearly.percentage - x.yearly.percentage);
+
+                    // Render Yearly List
+                    yearlyList.innerHTML = sortedYearlyProgress.map((b, idx) => {
+                        const y = b.yearly;
+                        const progressPct = Math.min(y.percentage, 100);
+                        // Progress bar colors: Green (<=50%), Orange (51%-80%), Red (>80%)
+                        const barColorClass = y.percentage <= 50 ? 'bg-green-500' : y.percentage <= 80 ? 'bg-yellow-500' : 'bg-red-500';
+                        const isOver = y.left_to_spend < 0;
+                        const leftStr = isOver 
+                            ? `₹${Math.abs(y.left_to_spend).toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2})} overspent of ₹${y.amount_limit.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2})}` 
+                            : `₹${y.left_to_spend.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2})} left of ₹${y.amount_limit.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+
+                        return `
+                        <div class="bg-surface-dark rounded-xl border border-border-dark overflow-hidden transition-all text-left">
+                            <div class="p-4 cursor-pointer hover:bg-surface-dark-2/40" onclick="screens.toggleBudgetL2('yearly', ${idx})">
+                                <div class="flex justify-between items-start mb-2">
+                                    <div>
+                                        <h3 class="font-extrabold text-base flex items-center gap-1.5">
+                                            ${b.l1_category_name}
+                                        </h3>
+                                        <p class="text-xs text-text-secondary mt-0.5">${leftStr}</p>
+                                    </div>
+                                    <div class="flex items-center gap-2">
+                                        <div class="text-right">
+                                            <p class="font-extrabold text-sm ${isOver ? 'text-red-400' : 'text-text-secondary'}">${y.percentage}%</p>
+                                            <p class="text-[10px] text-text-secondary font-semibold uppercase tracking-wider">YEARLY</p>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="w-full bg-background-dark rounded-full h-2.5 overflow-hidden">
+                                    <div class="h-full rounded-full ${barColorClass}" style="width: ${progressPct}%"></div>
+                                </div>
+                            </div>
+                            
+                            <!-- L2 Breakdown section -->
+                            <div id="yearlyBudgetL2-${idx}" class="hidden border-t border-border-dark/50 bg-background-dark/30 px-4 py-3 space-y-1.5">
+                                ${y.l2_breakdown.length ? y.l2_breakdown.map(l2 => `
+                                    <div class="flex items-center justify-between text-xs font-semibold py-0.5">
+                                        <span class="text-text-secondary">${l2.name}</span>
+                                        <span>₹${l2.spend.toLocaleString('en-IN', {minimumFractionDigits:2})}</span>
+                                    </div>
+                                `).join('') : '<p class="text-xs text-text-secondary italic text-center py-1">No transaction data in this year</p>'}
+                            </div>
+                        </div>`;
+                    }).join('');
+
+                } catch (e) {
+                    monthlyList.innerHTML = `<p class="text-center text-red-500 py-8">Failed to load budget progress: ${e.message}</p>`;
+                    yearlyList.innerHTML = `<p class="text-center text-red-500 py-8">Failed to load budget progress: ${e.message}</p>`;
+                }
+            },
+            toggleBudgetL2(type, idx) {
+                const block = document.getElementById(`${type}BudgetL2-${idx}`);
+                if (block) block.classList.toggle('hidden');
+            },
+            openEditBudgetModal(id, l1Name, amountLimit, rollover, period) {
+                this.budgetState.editingId = id;
+                document.getElementById('budgetModalTitle').textContent = "Edit Budget Limit";
+                document.getElementById('budgetL1SelectWrap').classList.add('hidden');
+                document.getElementById('budgetL1StaticWrap').classList.remove('hidden');
+                document.getElementById('budgetL1StaticName').textContent = l1Name;
+                document.getElementById('budgetAmountLimit').value = amountLimit;
+                document.getElementById('budgetPeriod').value = period;
+                document.getElementById('budgetRollover').checked = rollover;
+                document.getElementById('budgetIsActive').checked = true;
+
+                document.getElementById('budgetSaveBtn').onclick = () => this.saveBudget();
+                const modal = document.getElementById('budgetModal');
+                modal.classList.remove('hidden'); modal.classList.add('flex');
+            },
+            async openNewBudgetModal() {
+                this.budgetState.editingId = null;
+                document.getElementById('budgetModalTitle').textContent = "Add Budget Limit";
+                document.getElementById('budgetL1SelectWrap').classList.remove('hidden');
+                document.getElementById('budgetL1StaticWrap').classList.add('hidden');
+                
+                // Populate L1 options not already configured
+                const select = document.getElementById('budgetL1Name');
+                select.innerHTML = '';
+                
+                const configured = this.budgetState.loadedProgress.map(p => p.l1_category_name);
+                const l1Cats = getL1Categories();
+                
+                l1Cats.forEach(c => {
+                    if (!configured.includes(c.name)) {
+                        const opt = document.createElement('option');
+                        opt.value = c.name; opt.textContent = c.name;
+                        select.appendChild(opt);
+                    }
+                });
+
+                if (!select.children.length) {
+                    alert("All L1 categories already have active budget limits configured!");
+                    return;
+                }
+
+                document.getElementById('budgetAmountLimit').value = '5000';
+                document.getElementById('budgetPeriod').value = 'MONTHLY';
+                document.getElementById('budgetRollover').checked = false;
+                document.getElementById('budgetIsActive').checked = true;
+
+                document.getElementById('budgetSaveBtn').onclick = () => this.saveBudget();
+                const modal = document.getElementById('budgetModal');
+                modal.classList.remove('hidden'); modal.classList.add('flex');
+            },
+            closeBudgetModal() {
+                const modal = document.getElementById('budgetModal');
+                modal.classList.add('hidden'); modal.classList.remove('flex');
+                this.budgetState.editingId = null;
+            },
+            async saveBudget() {
+                const amount = parseFloat(document.getElementById('budgetAmountLimit').value) || 0;
+                if (amount <= 0) { alert('Enter valid amount greater than 0'); return; }
+                const period = document.getElementById('budgetPeriod').value;
+                const rollover = document.getElementById('budgetRollover').checked;
+                const isActive = document.getElementById('budgetIsActive').checked;
+
+                try {
+                    if (this.budgetState.editingId) {
+                        // PUT update
+                        const res = await fetch(`${API_BASE}/budgets/${this.budgetState.editingId}`, {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ amount_limit: amount, period, rollover, is_active: isActive })
+                        });
+                        const r = await res.json();
+                        if (res.ok) { this.closeBudgetModal(); await this.loadBudgetsProgress(); } else alert(r.detail || 'Update failed');
+                    } else {
+                        // POST create
+                        const l1Name = document.getElementById('budgetL1Name').value;
+                        const res = await fetch(`${API_BASE}/budgets`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ l1_category_name: l1Name, amount_limit: amount, period, rollover, is_active: isActive })
+                        });
+                        const r = await res.json();
+                        if (res.ok) { this.closeBudgetModal(); await this.loadBudgetsProgress(); } else alert(r.detail || 'Creation failed');
+                    }
+                } catch (e) { alert(e.message); }
+            },
         };
+
+        // Close category dropdowns on outside click
+        document.addEventListener('click', e => {
+            if (!e.target.closest('.cat-dropdown')) {
+                document.getElementById('recCatMenu')?.classList.remove('open');
+                document.getElementById('anCatMenu')?.classList.remove('open');
+            }
+        });
 
         router.render();
     </script>

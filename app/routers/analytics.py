@@ -1,4 +1,4 @@
-"""Analytics API router — uses parsed_date and new schema columns."""
+"""Analytics API router — unified dashboard endpoint."""
 
 from datetime import datetime
 from typing import Optional
@@ -8,277 +8,348 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import Transaction, Category
+from app.models import Transaction, Category, ReviewStatus
 
 router = APIRouter(prefix="/api/analytics", tags=["Analytics"])
 
+# L2 category name used for CC bill reconciliation tracking
+CC_BILL_L2_NAME = "Credit Card Bill"
 
-@router.get("/spending-overview", summary="Monthly spending overview")
-async def spending_overview(
-    year: Optional[int] = None,
+
+@router.get("/dashboard", summary="Unified analytics dashboard data")
+async def dashboard(
+    date_from: Optional[str] = Query(None, description="Start month YYYY-MM"),
+    date_to: Optional[str] = Query(None, description="End month YYYY-MM"),
+    account_type: Optional[str] = Query(None, description="Savings or CreditCard"),
+    categories: Optional[str] = Query(None, description="Comma-separated L1 category names"),
     db: Session = Depends(get_db),
 ) -> dict:
-    """Monthly debit/credit totals using parsed_date."""
-    query = db.query(
+    """
+    Single endpoint powering the entire analytics dashboard.
+
+    Rules:
+    - True Income: SUM(all credits) — no exclusions
+    - True Expenses: SUM(all debits) — no exclusions
+    - CC Bill Reconciliation: debits vs credits for 'Credit Card Bill' L2
+    - Pivot table: L1 → L2 hierarchy with credit, debit, difference columns
+    """
+
+    # ── Build lookups ──────────────────────────────────────────────────────
+    all_l1_cats = db.query(Category).filter(
+        Category.level == 1, Category.is_archived == 0
+    ).order_by(Category.name).all()
+
+    all_l2_cats = db.query(Category).filter(
+        Category.level == 2, Category.is_archived == 0
+    ).all()
+
+    all_dates = db.query(Transaction.parsed_date).filter(
+        Transaction.parsed_date.isnot(None)
+    ).distinct().all()
+    all_years = sorted(set(d[0][:4] for d in all_dates if d[0]), reverse=True)
+    all_account_types = [
+        r[0] for r in db.query(Transaction.account_type).distinct().filter(
+            Transaction.account_type.isnot(None)
+        ).all()
+    ]
+
+    # Lookup maps
+    l1_id_to_name = {c.id: c.name for c in all_l1_cats}
+    l1_id_to_color = {c.id: c.color_hex for c in all_l1_cats}
+    l1_name_to_id = {c.name: c.id for c in all_l1_cats}
+    l2_id_to_name = {c.id: c.name for c in all_l2_cats}
+    l2_id_to_parent = {c.id: c.parent_id for c in all_l2_cats}
+
+    # CC Bill L2 ID for reconciliation
+    cc_bill_l2_ids = set(c.id for c in all_l2_cats if c.name == CC_BILL_L2_NAME)
+
+    # Parse category filter
+    selected_categories = [c.strip() for c in categories.split(",") if c.strip()] if categories else []
+    selected_cat_ids = set()
+    if selected_categories:
+        for cat in all_l1_cats:
+            if cat.name in selected_categories:
+                selected_cat_ids.add(cat.id)
+
+    # ── Build FY options ──────────────────────────────────────────────────
+    fy_options = []
+    if all_years:
+        min_year = min(int(y) for y in all_years)
+        max_year = max(int(y) for y in all_years)
+        for start_year in range(max_year, min_year - 2, -1):
+            fy_label = f"FY {str(start_year)[-2:]}-{str(start_year + 1)[-2:]}"
+            fy_from = f"{start_year}-04"
+            fy_to = f"{start_year + 1}-03"
+            fy_options.append({"label": fy_label, "date_from": fy_from, "date_to": fy_to})
+
+    # ── Fetch transactions ────────────────────────────────────────────────
+    base_query = db.query(Transaction).filter(
+        Transaction.parsed_date.isnot(None),
+        Transaction.review_status == ReviewStatus.APPROVED.value
+    )
+
+    if date_from:
+        base_query = base_query.filter(Transaction.parsed_date >= date_from + "-01")
+    if date_to:
+        base_query = base_query.filter(Transaction.parsed_date <= date_to + "-31")
+    if account_type:
+        from sqlalchemy import func
+        # Normalize incoming request value to check match
+        norm_type = account_type.lower().replace(" ", "").replace("_", "")
+        # Normalize DB values for matching
+        base_query = base_query.filter(
+            func.lower(func.replace(func.replace(Transaction.account_type, " ", ""), "_", "")) == norm_type
+        )
+    if selected_cat_ids:
+        base_query = base_query.filter(Transaction.l1_category_id.in_(selected_cat_ids))
+
+    all_txns = base_query.with_entities(
         Transaction.parsed_date,
         Transaction.debit,
         Transaction.credit,
-    ).filter(Transaction.parsed_date.isnot(None))
+        Transaction.account_type,
+        Transaction.l1_category_id,
+        Transaction.l2_category_id,
+    ).order_by(Transaction.parsed_date.asc()).all()
 
-    if year:
-        query = query.filter(Transaction.parsed_date.like(f"{year}-%"))
+    # ── Compute everything in a single pass ───────────────────────────────
+    # Primary account types to show in pivot table columns
+    primary_account_types = ["Savings", "CreditCard"]
+    extra_account_types = [a for a in sorted(all_account_types) if a not in primary_account_types and a.lower() not in ["savings", "creditcard"]]
+    pivot_account_types = primary_account_types + extra_account_types
 
-    transactions = query.all()
+    total_income = 0.0
+    total_expense = 0.0
+    monthly_income = defaultdict(float)
+    monthly_expenses = defaultdict(float)
+    category_totals = defaultdict(float)        # L1 debit totals for donut
+    l2_totals = defaultdict(float)              # L2 debit totals for bar chart
 
-    monthly = defaultdict(lambda: {"total_debit": 0, "total_credit": 0})
-    daily = defaultdict(float)
+    # CC Bill reconciliation
+    cc_bill_debits = 0.0
+    cc_bill_credits = 0.0
 
-    for t in transactions:
-        month_key = t.parsed_date[:7]  # YYYY-MM
-        debit = t.debit or 0
-        credit = t.credit or 0
-        monthly[month_key]["total_debit"] += debit
-        monthly[month_key]["total_credit"] += credit
-        daily[t.parsed_date] += debit
+    # Pivot table structure:
+    # L1 -> { "label": name, "by_account": { acc: { "debit": 0, "credit": 0 } }, "total_debit": 0, "total_credit": 0, "difference": 0 }
+    def make_bucket(label):
+        return {
+            "name": label,
+            "by_account": {acc: {"debit": 0.0, "credit": 0.0} for acc in pivot_account_types},
+            "total_debit": 0.0,
+            "total_credit": 0.0,
+            "difference": 0.0,
+        }
 
-    monthly_list = sorted(
-        [{"month": k, "total_debit": round(v["total_debit"], 2), "total_credit": round(v["total_credit"], 2),
-          "net": round(v["total_credit"] - v["total_debit"], 2)} for k, v in monthly.items()],
-        key=lambda x: x["month"],
-    )
+    pivot_l1 = {}
+    pivot_l2 = defaultdict(dict)
 
-    daily_list = sorted(
-        [{"date": k, "amount": round(v, 2)} for k, v in daily.items()],
-        key=lambda x: x["date"],
-    )
+    # L1 categories excluded from expense distribution charts (not from KPIs)
+    non_expense_l1_names = {"Financial", "Income"}
 
-    total_debit = sum(m["total_debit"] for m in monthly_list)
-    total_credit = sum(m["total_credit"] for m in monthly_list)
-
-    return {
-        "total_debit": round(total_debit, 2),
-        "total_credit": round(total_credit, 2),
-        "net": round(total_credit - total_debit, 2),
-        "monthly": monthly_list,
-        "daily": daily_list,
-    }
-
-
-@router.get("/category-breakdown", summary="Category spending breakdown")
-async def category_breakdown(
-    months: int = Query(6, ge=1, le=24),
-    year: Optional[int] = Query(None),
-    month: Optional[int] = Query(None, ge=1, le=12),
-    db: Session = Depends(get_db),
-) -> dict:
-    """Per-L1-category spending totals."""
-    query = db.query(Transaction).filter(
-        Transaction.debit.isnot(None),
-        Transaction.debit > 0,
-        Transaction.parsed_date.isnot(None),
-    )
-
-    if year and month:
-        prefix = f"{year}-{month:02d}"
-        query = query.filter(Transaction.parsed_date.like(f"{prefix}%"))
-        period_label = f"{datetime(year, month, 1).strftime('%b')} {year}"
-    elif year:
-        query = query.filter(Transaction.parsed_date.like(f"{year}-%"))
-        period_label = str(year)
-    else:
-        now = datetime.now()
-        cutoff_month = now.month - months
-        cutoff_year = now.year
-        while cutoff_month <= 0:
-            cutoff_month += 12
-            cutoff_year -= 1
-        cutoff_date = f"{cutoff_year}-{cutoff_month:02d}-01"
-        query = query.filter(Transaction.parsed_date >= cutoff_date)
-        period_label = f"Last {months} months"
-
-    transactions = query.all()
-
-    # Build L1 category name lookup
-    l1_cats = {c.id: c.name for c in db.query(Category).filter(Category.level == 1).all()}
-
-    category_totals = defaultdict(float)
-    monthly_categories = defaultdict(lambda: defaultdict(float))
-    grand_total = 0
-
-    for t in transactions:
-        cat_name = l1_cats.get(t.l1_category_id, "Uncategorized")
-        amount = t.debit or 0
-        category_totals[cat_name] += amount
-        grand_total += amount
+    for t in all_txns:
         month_key = t.parsed_date[:7]
-        monthly_categories[month_key][cat_name] += amount
+        debit = t.debit or 0.0
+        credit = t.credit or 0.0
+        l1_name = l1_id_to_name.get(t.l1_category_id, "Uncategorized")
+        l2_name = l2_id_to_name.get(t.l2_category_id, "(blank)")
+        acc_type = t.account_type or "Unknown"
 
-    categories_list = sorted(
-        [{"name": k, "total": round(v, 2),
-          "percentage": round((v / grand_total * 100) if grand_total > 0 else 0, 1)}
-         for k, v in category_totals.items()],
+        # Match account type to pivot columns
+        matched_acc = next((a for a in pivot_account_types if a.lower() == acc_type.lower()), acc_type)
+        if matched_acc not in pivot_account_types:
+            pivot_account_types.append(matched_acc)
+            # update existing buckets
+            for bucket in pivot_l1.values():
+                bucket["by_account"][matched_acc] = {"debit": 0.0, "credit": 0.0}
+            for l1_k in pivot_l2:
+                for bucket in pivot_l2[l1_k].values():
+                    bucket["by_account"][matched_acc] = {"debit": 0.0, "credit": 0.0}
+
+        # ── KPI Calculations matching pivot_table_viewer.html ─────────────────
+        if l1_name.lower() == "income":
+            # Income category is treated as inflow: Credit - Debit
+            inflow = credit - debit
+            total_income += inflow
+            if credit > 0:
+                monthly_income[month_key] += credit
+        else:
+            # Every non-income category is treated as expense: Debit - Credit (credits/refunds reduce expense)
+            outflow = debit - credit
+            total_expense += outflow
+            if debit > 0:
+                monthly_expenses[month_key] += debit
+
+        # ── Category distribution (charts only — excludes Financial/Income)
+        if debit > 0 and l1_name and l1_name not in non_expense_l1_names:
+            category_totals[l1_name] += debit
+        if debit > 0 and l2_name and l2_name != "(blank)" and l1_name and l1_name not in non_expense_l1_names:
+            l2_totals[l2_name] += debit
+
+        # ── CC Bill reconciliation ────────────────────────────────────
+        if t.l2_category_id in cc_bill_l2_ids:
+            cc_bill_debits += debit
+            cc_bill_credits += credit
+
+        # ── Pivot table ───────────────────────────────────────────────
+        if l1_name not in pivot_l1:
+            pivot_l1[l1_name] = make_bucket(l1_name)
+
+        l1_b = pivot_l1[l1_name]
+        l1_b["by_account"][matched_acc]["debit"] += debit
+        l1_b["by_account"][matched_acc]["credit"] += credit
+        l1_b["total_debit"] += debit
+        l1_b["total_credit"] += credit
+
+        if l2_name and l2_name != "(blank)":
+            if l2_name not in pivot_l2[l1_name]:
+                pivot_l2[l1_name][l2_name] = make_bucket(l2_name)
+            l2_b = pivot_l2[l1_name][l2_name]
+            l2_b["by_account"][matched_acc]["debit"] += debit
+            l2_b["by_account"][matched_acc]["credit"] += credit
+            l2_b["total_debit"] += debit
+            l2_b["total_credit"] += credit
+
+    # Round bucket values and compute differences
+    for l1_b in pivot_l1.values():
+        l1_b["total_debit"] = round(l1_b["total_debit"], 2)
+        l1_b["total_credit"] = round(l1_b["total_credit"], 2)
+        l1_b["difference"] = round(l1_b["total_credit"] - l1_b["total_debit"], 2)
+        for acc in l1_b["by_account"]:
+            l1_b["by_account"][acc]["debit"] = round(l1_b["by_account"][acc]["debit"], 2)
+            l1_b["by_account"][acc]["credit"] = round(l1_b["by_account"][acc]["credit"], 2)
+
+    for l1_k in pivot_l2:
+        for l2_b in pivot_l2[l1_k].values():
+            l2_b["total_debit"] = round(l2_b["total_debit"], 2)
+            l2_b["total_credit"] = round(l2_b["total_credit"], 2)
+            l2_b["difference"] = round(l2_b["total_credit"] - l2_b["total_debit"], 2)
+            for acc in l2_b["by_account"]:
+                l2_b["by_account"][acc]["debit"] = round(l2_b["by_account"][acc]["debit"], 2)
+                l2_b["by_account"][acc]["credit"] = round(l2_b["by_account"][acc]["credit"], 2)
+
+    total_income = round(total_income, 2)
+    total_expense = round(total_expense, 2)
+    net_savings = round(total_income - total_expense, 2)
+    savings_rate = round((net_savings / total_income * 100), 2) if total_income != 0 else 0.0
+
+    # ── Monthly trend with cumulative ─────────────────────────────────────
+    all_months = sorted(set(list(monthly_income.keys()) + list(monthly_expenses.keys())))
+    cumulative = 0.0
+    monthly_trend = []
+    for m in all_months:
+        inc = monthly_income[m]
+        exp = monthly_expenses[m]
+        cumulative += inc - exp
+        monthly_trend.append({
+            "month": m,
+            "income": round(inc, 2),
+            "expenses": round(exp, 2),
+            "cumulative": round(cumulative, 2),
+        })
+
+    # ── L1 Category distribution (charts) ─────────────────────────────────
+    grand_expense_total = sum(category_totals.values())
+    category_distribution = sorted(
+        [
+            {
+                "name": name,
+                "total": round(total, 2),
+                "percentage": round((total / grand_expense_total * 100) if grand_expense_total > 0 else 0, 1),
+                "color": l1_id_to_color.get(
+                    next((c.id for c in all_l1_cats if c.name == name), None), "#666666"
+                ),
+            }
+            for name, total in category_totals.items()
+        ],
         key=lambda x: x["total"],
         reverse=True,
     )
 
-    monthly_list = sorted(
-        [{"month": m, "categories": [{"name": cat, "total": round(amt, 2)}
-          for cat, amt in sorted(cats.items(), key=lambda x: x[1], reverse=True)]}
-         for m, cats in monthly_categories.items()],
-        key=lambda x: x["month"],
+    # ── L2 Sub-category distribution (charts) ─────────────────────────────
+    grand_l2_total = sum(l2_totals.values())
+    l2_distribution = sorted(
+        [
+            {
+                "name": name,
+                "total": round(total, 2),
+                "percentage": round((total / grand_l2_total * 100) if grand_l2_total > 0 else 0, 1),
+            }
+            for name, total in l2_totals.items()
+        ],
+        key=lambda x: x["total"],
+        reverse=True,
     )
 
-    # Available years
-    all_dates = db.query(Transaction.parsed_date).filter(Transaction.parsed_date.isnot(None)).distinct().all()
-    all_years = sorted(set(d[0][:4] for d in all_dates if d[0]), reverse=True)
-
-    return {
-        "grand_total": round(grand_total, 2),
-        "categories": categories_list,
-        "monthly": monthly_list,
-        "period_label": period_label,
-        "available_years": [int(y) for y in all_years],
+    # ── CC Bill Reconciliation ────────────────────────────────────────────
+    cc_bill_difference = round(cc_bill_debits - cc_bill_credits, 2)
+    cc_reconciliation = {
+        "total_debits": round(cc_bill_debits, 2),
+        "total_credits": round(cc_bill_credits, 2),
+        "difference": cc_bill_difference,
+        "status": "balanced" if abs(cc_bill_difference) < 1 else "unbalanced",
     }
 
+    # ── Pivot table array ──────────────────────────────────────────────────
+    pivot_table = []
+    for l1_name in sorted(pivot_l1.keys()):
+        l1_b = pivot_l1[l1_name]
+        children = []
+        if l1_name in pivot_l2:
+            for l2_name in sorted(pivot_l2[l1_name].keys()):
+                children.append(pivot_l2[l1_name][l2_name])
 
-@router.get("/category-transactions", summary="Transactions for a category")
-async def category_transactions(
-    category: str = Query(..., description="L1 category name"),
-    year: Optional[int] = Query(None),
-    month: Optional[int] = Query(None, ge=1, le=12),
-    db: Session = Depends(get_db),
-) -> dict:
-    """Get all transactions for a given L1 category name."""
-    # Find category ID by name
-    cat = db.query(Category).filter(Category.name == category, Category.level == 1).first()
+        l1_b["children"] = sorted(children, key=lambda x: x["total_debit"], reverse=True)
+        pivot_table.append(l1_b)
 
-    query = db.query(Transaction).filter(
-        Transaction.debit.isnot(None),
-        Transaction.debit > 0,
-    )
+    # Grand total row calculation
+    grand_by_account = {acc: {"debit": 0.0, "credit": 0.0} for acc in pivot_account_types}
+    grand_total_debit = 0.0
+    grand_total_credit = 0.0
 
-    if category == "Uncategorized":
-        query = query.filter(Transaction.l1_category_id.is_(None))
-    elif cat:
-        query = query.filter(Transaction.l1_category_id == cat.id)
-    else:
-        return {"category": category, "count": 0, "total": 0, "transactions": []}
+    for r in pivot_table:
+        grand_total_debit += r["total_debit"]
+        grand_total_credit += r["total_credit"]
+        for acc in pivot_account_types:
+            grand_by_account[acc]["debit"] += r["by_account"][acc]["debit"]
+            grand_by_account[acc]["credit"] += r["by_account"][acc]["credit"]
 
-    if year:
-        query = query.filter(Transaction.parsed_date.like(f"{year}-%"))
-    if month and year:
-        query = query.filter(Transaction.parsed_date.like(f"{year}-{month:02d}%"))
+    grand_total_debit = round(grand_total_debit, 2)
+    grand_total_credit = round(grand_total_credit, 2)
+    grand_diff = round(grand_total_credit - grand_total_debit, 2)
+    for acc in pivot_account_types:
+        grand_by_account[acc]["debit"] = round(grand_by_account[acc]["debit"], 2)
+        grand_by_account[acc]["credit"] = round(grand_by_account[acc]["credit"], 2)
 
-    txns = query.order_by(Transaction.parsed_date.desc()).all()
-
-    result = [{
-        "id": t.id,
-        "date": t.parsed_date or t.raw_date,
-        "details": (t.merchant_name or t.cleaned_details or t.raw_details or "")[:120],
-        "debit": t.debit or 0,
-        "account": t.account_name,
-        "notes": t.notes,
-    } for t in txns]
-
+    # ── Response ──────────────────────────────────────────────────────────
     return {
-        "category": category,
-        "count": len(result),
-        "total": round(sum(t["debit"] for t in result), 2),
-        "transactions": result,
+        "filters": {
+            "available_years": [int(y) for y in all_years],
+            "available_account_types": sorted(all_account_types),
+            "available_categories": [{"id": c.id, "name": c.name} for c in all_l1_cats],
+            "fy_options": fy_options,
+            "applied": {
+                "date_from": date_from,
+                "date_to": date_to,
+                "account_type": account_type,
+                "categories": selected_categories,
+            },
+        },
+        "kpi": {
+            "true_income": total_income,
+            "true_expenses": total_expense,
+            "net_savings": net_savings,
+            "savings_rate": savings_rate,
+        },
+        "monthly_trend": monthly_trend,
+        "category_distribution": category_distribution,
+        "l2_distribution": l2_distribution,
+        "cc_reconciliation": cc_reconciliation,
+        "account_types": pivot_account_types,
+        "pivot_table": pivot_table,
+        "pivot_grand_total": {
+            "by_account": grand_by_account,
+            "total_debit": grand_total_debit,
+            "total_credit": grand_total_credit,
+            "difference": grand_diff,
+        },
     }
-
-
-@router.get("/account-analysis", summary="Account-level analysis")
-async def account_analysis(db: Session = Depends(get_db)) -> dict:
-    transactions = db.query(
-        Transaction.parsed_date,
-        Transaction.debit,
-        Transaction.credit,
-        Transaction.account_name,
-        Transaction.account_type,
-    ).all()
-
-    by_account = defaultdict(lambda: {"total_debit": 0, "total_credit": 0, "count": 0})
-    by_type = defaultdict(lambda: {"total_debit": 0, "total_credit": 0, "count": 0})
-    monthly_accounts = defaultdict(lambda: defaultdict(lambda: {"debit": 0, "credit": 0}))
-
-    for t in transactions:
-        acc = t.account_name or "Unknown"
-        acc_type = t.account_type or "Unknown"
-        debit = t.debit or 0
-        credit = t.credit or 0
-
-        by_account[acc]["total_debit"] += debit
-        by_account[acc]["total_credit"] += credit
-        by_account[acc]["count"] += 1
-
-        by_type[acc_type]["total_debit"] += debit
-        by_type[acc_type]["total_credit"] += credit
-        by_type[acc_type]["count"] += 1
-
-        if t.parsed_date:
-            month_key = t.parsed_date[:7]
-            monthly_accounts[month_key][acc]["debit"] += debit
-            monthly_accounts[month_key][acc]["credit"] += credit
-
-    account_list = sorted(
-        [{"name": k, "total_debit": round(v["total_debit"], 2), "total_credit": round(v["total_credit"], 2), "count": v["count"]}
-         for k, v in by_account.items()],
-        key=lambda x: x["total_debit"], reverse=True,
-    )
-    type_list = sorted(
-        [{"type": k, "total_debit": round(v["total_debit"], 2), "total_credit": round(v["total_credit"], 2), "count": v["count"]}
-         for k, v in by_type.items()],
-        key=lambda x: x["total_debit"], reverse=True,
-    )
-    monthly_list = sorted(
-        [{"month": month, "accounts": [{"name": acc, "debit": round(vals["debit"], 2), "credit": round(vals["credit"], 2)}
-          for acc, vals in accs.items()]} for month, accs in monthly_accounts.items()],
-        key=lambda x: x["month"],
-    )
-
-    return {"by_account": account_list, "by_type": type_list, "monthly": monthly_list}
-
-
-@router.get("/top-transactions", summary="Top merchants and largest transactions")
-async def top_transactions(limit: int = Query(10, ge=1, le=50), db: Session = Depends(get_db)) -> dict:
-    transactions = db.query(Transaction).all()
-
-    merchant_stats = defaultdict(lambda: {"count": 0, "total": 0})
-    all_txns = []
-
-    for t in transactions:
-        display = t.merchant_name or t.cleaned_details or t.raw_details or "Unknown"
-        debit = t.debit or 0
-        credit = t.credit or 0
-
-        if debit > 0:
-            merchant_stats[display]["count"] += 1
-            merchant_stats[display]["total"] += debit
-
-        l1_name = t.l1_category.name if t.l1_category else None
-        all_txns.append({
-            "id": t.id,
-            "date": t.parsed_date or t.raw_date,
-            "details": display[:100],
-            "debit": debit,
-            "credit": credit,
-            "account": t.account_name,
-            "category": l1_name,
-        })
-
-    top_merchants = sorted(
-        [{"name": k, "count": v["count"], "total": round(v["total"], 2)} for k, v in merchant_stats.items() if v["count"] > 0],
-        key=lambda x: x["total"], reverse=True,
-    )[:limit]
-
-    largest_debits = sorted([t for t in all_txns if t["debit"] > 0], key=lambda x: x["debit"], reverse=True)[:limit]
-    largest_credits = sorted([t for t in all_txns if t["credit"] > 0], key=lambda x: x["credit"], reverse=True)[:limit]
-
-    recurring = sorted(
-        [{"name": k, "count": v["count"], "total": round(v["total"], 2), "avg": round(v["total"] / v["count"], 2)}
-         for k, v in merchant_stats.items() if v["count"] >= 3],
-        key=lambda x: x["count"], reverse=True,
-    )[:limit]
-
-    return {"top_merchants": top_merchants, "largest_debits": largest_debits, "largest_credits": largest_credits, "recurring": recurring}
