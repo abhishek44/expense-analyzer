@@ -37,44 +37,140 @@
         }
     </script>
     <style>
-        body { min-height: 100dvh; }
-        .material-symbols-outlined { font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24; }
-        .no-scrollbar::-webkit-scrollbar { display: none; }
-        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
-        .cat-dropdown { position: relative; }
-        .cat-dropdown-menu {
-            display: none; position: absolute; top: 100%; left: 0; right: 0;
-            z-index: 50; max-height: 240px; overflow-y: auto;
-            background: #1c232d; border: 1px solid #2a3441; border-radius: 8px;
-            margin-top: 4px; box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+        body {
+            min-height: 100dvh;
         }
-        .cat-dropdown-menu.open { display: block; }
+
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+
+        .no-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+
+        .no-scrollbar {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+
+        .cat-dropdown {
+            position: relative;
+        }
+
+        .cat-dropdown-menu {
+            display: none;
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            z-index: 50;
+            max-height: 240px;
+            overflow-y: auto;
+            background: #1c232d;
+            border: 1px solid #2a3441;
+            border-radius: 8px;
+            margin-top: 4px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+        }
+
+        .cat-dropdown-menu.open {
+            display: block;
+        }
+
         .cat-dropdown-menu label {
-            display: flex; align-items: center; gap: 8px;
-            padding: 8px 12px; cursor: pointer; font-size: 13px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 12px;
+            cursor: pointer;
+            font-size: 13px;
             transition: background 0.15s;
         }
-        .cat-dropdown-menu label:hover { background: #232d3a; }
+
+        .cat-dropdown-menu label:hover {
+            background: #232d3a;
+        }
+
         .chart-card {
             background: linear-gradient(145deg, #1c232d, #1e2835);
-            border: 1px solid #2a3441; border-radius: 12px; padding: 20px;
+            border: 1px solid #2a3441;
+            border-radius: 12px;
+            padding: 20px;
         }
+
         /* Pivot table */
-        .pivot-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-        .pivot-table th { text-align: right; padding: 8px 12px; font-weight: 600; font-size: 11px;
-            text-transform: uppercase; letter-spacing: 0.05em; color: #9dabb9; border-bottom: 2px solid #2a3441; }
-        .pivot-table th:first-child { text-align: left; }
-        .pivot-table td { padding: 6px 12px; border-bottom: 1px solid #2a344180; }
-        .pivot-table td:not(:first-child) { text-align: right; font-variant-numeric: tabular-nums; }
-        .pivot-l1 { cursor: pointer; transition: background 0.15s; }
-        .pivot-l1:hover { background: #232d3a; }
-        .pivot-l1 td { font-weight: 700; }
-        .pivot-l2 { cursor: pointer; background: #161e28; transition: background 0.15s; }
-        .pivot-l2:hover { background: #232d3a; }
-        .pivot-l2 td { padding-left: 28px !important; font-weight: 400; color: #c5d0db; }
-        .pivot-grand td { font-weight: 800; border-top: 2px solid #2a3441; border-bottom: none;
-            padding-top: 10px; padding-bottom: 10px; }
-        .pivot-hidden { display: none; }
+        .pivot-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+
+        .pivot-table th {
+            text-align: right;
+            padding: 8px 12px;
+            font-weight: 600;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: #9dabb9;
+            border-bottom: 2px solid #2a3441;
+        }
+
+        .pivot-table th:first-child {
+            text-align: left;
+        }
+
+        .pivot-table td {
+            padding: 6px 12px;
+            border-bottom: 1px solid #2a344180;
+        }
+
+        .pivot-table td:not(:first-child) {
+            text-align: right;
+            font-variant-numeric: tabular-nums;
+        }
+
+        .pivot-l1 {
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+
+        .pivot-l1:hover {
+            background: #232d3a;
+        }
+
+        .pivot-l1 td {
+            font-weight: 700;
+        }
+
+        .pivot-l2 {
+            cursor: pointer;
+            background: #161e28;
+            transition: background 0.15s;
+        }
+
+        .pivot-l2:hover {
+            background: #232d3a;
+        }
+
+        .pivot-l2 td {
+            padding-left: 28px !important;
+            font-weight: 400;
+            color: #c5d0db;
+        }
+
+        .pivot-grand td {
+            font-weight: 800;
+            border-top: 2px solid #2a3441;
+            border-bottom: none;
+            padding-top: 10px;
+            padding-bottom: 10px;
+        }
+
+        .pivot-hidden {
+            display: none;
+        }
     </style>
 </head>
 
@@ -193,15 +289,16 @@
         }
         function fmtMonth(m) {
             const [y, mo] = m.split('-');
-            const names = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+            const names = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
             return names[parseInt(mo) - 1] + ' ' + y.slice(2);
         }
         function generateMonthOptions(years) {
             const months = [];
-            const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-            for (const y of [...years].sort()) {
+            const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+            const validYears = (years || []).map(y => parseInt(y, 10)).filter(y => !isNaN(y) && y >= 2000 && y <= 2099).sort();
+            for (const y of validYears) {
                 for (let m = 1; m <= 12; m++) {
-                    months.push({ value: `${y}-${String(m).padStart(2,'0')}`, label: `${monthNames[m-1]} ${y}` });
+                    months.push({ value: `${y}-${String(m).padStart(2, '0')}`, label: `${monthNames[m - 1]} ${y}` });
                 }
             }
             return months;
@@ -388,7 +485,7 @@
                         <div class="flex items-center justify-between gap-2">
                             <div class="flex items-center gap-2">
                                 <h1 class="text-lg font-bold truncate">${filename ? 'File: ' + filename : 'Records'}</h1>
-                                ${filename ? `<button onclick="appState.filters.filename=''; screens.initRecords();" class="text-xs text-primary font-bold hover:underline">(Show All)</button>` : ''}
+                                ${filename ? `<button onclick="appState.filters.filename=''; router.navigate('records');" class="text-xs text-primary font-bold hover:underline">(Show All)</button>` : ''}
                             </div>
                             <div id="recFyButtons" class="flex gap-1.5 flex-wrap"></div>
                         </div>
@@ -474,7 +571,14 @@
                     const dash = await api.getAnalyticsDashboard();
                     appState.analyticsMeta = dash.filters;
                     this.populateRecordsFilterUI(dash.filters);
-                } catch (e) { console.error(e); }
+                } catch (e) {
+                    console.error(e);
+                    const curYr = new Date().getFullYear();
+                    this.populateRecordsFilterUI({
+                        available_years: [curYr, curYr - 1],
+                        available_categories: appState.categories || []
+                    });
+                }
 
                 await this.loadRecords();
             },
@@ -636,10 +740,7 @@
                 appState.filters.categories = [];
                 appState.filters.search = '';
                 appState.filters.filename = '';
-                const searchInput = document.getElementById('recSearchInput');
-                if (searchInput) searchInput.value = '';
-                if (appState.analyticsMeta) this.populateRecordsFilterUI(appState.analyticsMeta);
-                this.loadRecords();
+                router.navigate('records');
             },
             updateRecResetBtn() {
                 const btn = document.getElementById('recResetBtn');
@@ -670,7 +771,7 @@
                     const cards = appState.loadedTransactions.map(t => {
                         const name = t.merchant_name || t.cleaned_details || t.raw_details || 'Transaction';
                         const subtitle = [t.flow_direction, t.account_name].filter(Boolean).join(' • ');
-                        const amtStr = t.debit ? `- ₹${t.debit.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2})}` : t.credit ? `+ ₹${t.credit.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2})}` : '₹0.00';
+                        const amtStr = t.debit ? `- ₹${t.debit.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : t.credit ? `+ ₹${t.credit.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '₹0.00';
                         const amtClass = t.debit ? 'text-red-400' : t.credit ? 'text-green-400' : 'text-gray-300';
                         return `
                         <div onclick="router.navigate('details', {id: ${t.id}})" class="bg-surface-dark p-4 rounded-xl cursor-pointer hover:border-primary/50 border border-border-dark transition-all">
@@ -1089,7 +1190,7 @@
                 modal.classList.add('flex');
 
                 if (!appState.categories || !appState.categories.length) {
-                    try { appState.categories = await api.getCategories(); } catch (e) {}
+                    try { appState.categories = await api.getCategories(); } catch (e) { }
                 }
                 let l1CatId = null;
                 let l2CatId = null;
@@ -1115,7 +1216,7 @@
                     list.innerHTML = txns.map(t => {
                         const name = t.merchant_name || t.cleaned_details || t.raw_details || 'Transaction';
                         const subtitleText = [t.flow_direction, t.account_name].filter(Boolean).join(' • ');
-                        const amtStr = t.debit ? `- ₹${t.debit.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2})}` : t.credit ? `+ ₹${t.credit.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2})}` : '₹0.00';
+                        const amtStr = t.debit ? `- ₹${t.debit.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : t.credit ? `+ ₹${t.credit.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '₹0.00';
                         const amtClass = t.debit ? 'text-red-400' : t.credit ? 'text-green-400' : 'text-gray-300';
                         return `
                         <div onclick="screens.closePivotModal(); router.navigate('details', {id: ${t.id}})"
@@ -1164,8 +1265,10 @@
                         interaction: { intersect: false, mode: 'index' },
                         plugins: {
                             legend: { position: 'top', labels: { usePointStyle: true, padding: 12, font: { size: 11 } } },
-                            tooltip: { backgroundColor: '#1c232d', borderColor: '#2a3441', borderWidth: 1,
-                                callbacks: { label: ctx => `${ctx.dataset.label}: ${fmt(ctx.parsed.y)}` } }
+                            tooltip: {
+                                backgroundColor: '#1c232d', borderColor: '#2a3441', borderWidth: 1,
+                                callbacks: { label: ctx => `${ctx.dataset.label}: ${fmt(ctx.parsed.y)}` }
+                            }
                         },
                         scales: {
                             y: { grid: { color: 'rgba(42,52,65,0.5)' }, ticks: { callback: v => fmt(v), font: { size: 10 } } },
@@ -1191,8 +1294,10 @@
                         responsive: true, maintainAspectRatio: false,
                         plugins: {
                             legend: { display: false },
-                            tooltip: { backgroundColor: '#1c232d', borderColor: '#2a3441', borderWidth: 1,
-                                callbacks: { label: ctx => `Net: ${ctx.parsed.y >= 0 ? '+' : ''}${fmt(ctx.parsed.y)}` } }
+                            tooltip: {
+                                backgroundColor: '#1c232d', borderColor: '#2a3441', borderWidth: 1,
+                                callbacks: { label: ctx => `Net: ${ctx.parsed.y >= 0 ? '+' : ''}${fmt(ctx.parsed.y)}` }
+                            }
                         },
                         scales: {
                             y: { grid: { color: 'rgba(42,52,65,0.5)' }, ticks: { callback: v => fmt(v), font: { size: 10 } } },
@@ -1215,8 +1320,10 @@
                         responsive: true, maintainAspectRatio: false, cutout: '65%',
                         plugins: {
                             legend: { display: false },
-                            tooltip: { backgroundColor: '#1c232d', borderColor: '#2a3441', borderWidth: 1,
-                                callbacks: { label: ctx => `${ctx.label}: ${fmt(ctx.parsed)} (${categories[ctx.dataIndex]?.percentage || 0}%)` } }
+                            tooltip: {
+                                backgroundColor: '#1c232d', borderColor: '#2a3441', borderWidth: 1,
+                                callbacks: { label: ctx => `${ctx.label}: ${fmt(ctx.parsed)} (${categories[ctx.dataIndex]?.percentage || 0}%)` }
+                            }
                         }
                     }
                 });
@@ -1255,8 +1362,10 @@
                         indexAxis: 'y', responsive: true, maintainAspectRatio: false,
                         plugins: {
                             legend: { display: false },
-                            tooltip: { backgroundColor: '#1c232d', borderColor: '#2a3441', borderWidth: 1,
-                                callbacks: { label: ctx => `${fmt(l2data[ctx.dataIndex].total)} (${l2data[ctx.dataIndex].percentage}%)` } }
+                            tooltip: {
+                                backgroundColor: '#1c232d', borderColor: '#2a3441', borderWidth: 1,
+                                callbacks: { label: ctx => `${fmt(l2data[ctx.dataIndex].total)} (${l2data[ctx.dataIndex].percentage}%)` }
+                            }
                         },
                         scales: {
                             x: { grid: { color: 'rgba(42,52,65,0.5)' }, ticks: { callback: v => fmt(v), font: { size: 10 } } },
@@ -1338,7 +1447,7 @@
                                         <input id="editDate" type="date" value="${esc(rawDateVal)}" class="w-full h-10 px-2 mt-1 rounded-lg border border-border-dark bg-background-dark text-xs" />
                                     </div>
                                     <div>
-                                        <label class="text-xs text-text-secondary font-medium">System Date</label>
+                                        <label class="text-xs text-text-secondary font-medium">Statement Date</label>
                                         <input id="editStatementDate" type="date" value="${esc(t.statement_date || '')}" class="w-full h-10 px-2 mt-1 rounded-lg border border-border-dark bg-background-dark text-xs" />
                                     </div>
                                     <div>
@@ -1495,7 +1604,7 @@
                     <main class="flex-1 p-4 space-y-4">
                         <div class="grid grid-cols-3 gap-2">
                             <div><label class="text-xs text-text-secondary font-medium">Transaction Date</label><input id="manualDate" type="date" class="w-full h-12 px-2 mt-1 rounded-lg border border-border-dark bg-surface-dark text-xs" value="${new Date().toISOString().split('T')[0]}" /></div>
-                            <div><label class="text-xs text-text-secondary font-medium">System Date</label><input id="manualStatementDate" type="date" class="w-full h-12 px-2 mt-1 rounded-lg border border-border-dark bg-surface-dark text-xs" /></div>
+                            <div><label class="text-xs text-text-secondary font-medium">Statement Date</label><input id="manualStatementDate" type="date" class="w-full h-12 px-2 mt-1 rounded-lg border border-border-dark bg-surface-dark text-xs" /></div>
                             <div><label class="text-xs text-text-secondary font-medium">Mapping Date</label><input id="manualMappingDate" type="date" class="w-full h-12 px-2 mt-1 rounded-lg border border-border-dark bg-surface-dark text-xs" /></div>
                         </div>
                         <div class="grid grid-cols-2 gap-3">
@@ -1812,7 +1921,7 @@
                     if (!data.accounts.length) { list.innerHTML = '<p class="text-center text-text-secondary py-8">No accounts yet</p>'; return; }
                     list.innerHTML = data.accounts.map(a => `
                         <div class="bg-surface-dark p-4 rounded-xl border border-border-dark flex items-center justify-between">
-                            <div><p class="font-bold">${a.name}</p><p class="text-sm text-text-secondary">Balance: ₹${a.balance.toLocaleString('en-IN', {minimumFractionDigits: 2})}</p></div>
+                            <div><p class="font-bold">${a.name}</p><p class="text-sm text-text-secondary">Balance: ₹${a.balance.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</p></div>
                             <button onclick="screens.deleteAccountById('${a.id}','${a.name.replace(/'/g, "\\'")}')" class="p-2 text-red-500 hover:bg-red-900/20 rounded-full"><span class="material-symbols-outlined">delete</span></button>
                         </div>`).join('');
                 } catch (e) { list.innerHTML = '<p class="text-center text-red-500 py-8">Failed to load accounts</p>'; }
@@ -1942,14 +2051,23 @@
                 // Load month dropdown
                 try {
                     const dash = await api.getAnalyticsDashboard();
-                    const years = dash.filters.available_years || [2026, 2025];
+                    const years = dash.filters.available_years || [new Date().getFullYear(), new Date().getFullYear() - 1];
                     const months = generateMonthOptions(years);
                     const monthSel = document.getElementById('budgetMonthSelect');
                     if (monthSel) {
                         monthSel.innerHTML = months.reverse().map(m => `<option value="${m.value}">${m.label}</option>`).join('');
                         monthSel.value = this.budgetState.currentMonth;
                     }
-                } catch (e) { console.error(e); }
+                } catch (e) {
+                    console.error(e);
+                    const curYr = new Date().getFullYear();
+                    const months = generateMonthOptions([curYr, curYr - 1]);
+                    const monthSel = document.getElementById('budgetMonthSelect');
+                    if (monthSel) {
+                        monthSel.innerHTML = months.reverse().map(m => `<option value="${m.value}">${m.label}</option>`).join('');
+                        monthSel.value = this.budgetState.currentMonth;
+                    }
+                }
 
                 await this.loadBudgetsProgress();
             },
@@ -1986,9 +2104,9 @@
                         // Progress bar colors: Green (<=50%), Orange (51%-80%), Red (>80%)
                         const barColorClass = m.percentage <= 50 ? 'bg-green-500' : m.percentage <= 80 ? 'bg-yellow-500' : 'bg-red-500';
                         const isOver = m.left_to_spend < 0;
-                        const leftStr = isOver 
-                            ? `₹${Math.abs(m.left_to_spend).toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2})} overspent of ₹${m.amount_limit.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2})}` 
-                            : `₹${m.left_to_spend.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2})} left of ₹${m.amount_limit.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+                        const leftStr = isOver
+                            ? `₹${Math.abs(m.left_to_spend).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} overspent of ₹${m.amount_limit.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                            : `₹${m.left_to_spend.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} left of ₹${m.amount_limit.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
                         return `
                         <div class="bg-surface-dark rounded-xl border border-border-dark overflow-hidden transition-all text-left">
@@ -2022,7 +2140,7 @@
                                 ${m.l2_breakdown.length ? m.l2_breakdown.map(l2 => `
                                     <div class="flex items-center justify-between text-xs font-semibold py-0.5">
                                         <span class="text-text-secondary">${l2.name}</span>
-                                        <span>₹${l2.spend.toLocaleString('en-IN', {minimumFractionDigits:2})}</span>
+                                        <span>₹${l2.spend.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
                                     </div>
                                 `).join('') : '<p class="text-xs text-text-secondary italic text-center py-1">No transaction data in this month</p>'}
                             </div>
@@ -2039,9 +2157,9 @@
                         // Progress bar colors: Green (<=50%), Orange (51%-80%), Red (>80%)
                         const barColorClass = y.percentage <= 50 ? 'bg-green-500' : y.percentage <= 80 ? 'bg-yellow-500' : 'bg-red-500';
                         const isOver = y.left_to_spend < 0;
-                        const leftStr = isOver 
-                            ? `₹${Math.abs(y.left_to_spend).toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2})} overspent of ₹${y.amount_limit.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2})}` 
-                            : `₹${y.left_to_spend.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2})} left of ₹${y.amount_limit.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+                        const leftStr = isOver
+                            ? `₹${Math.abs(y.left_to_spend).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} overspent of ₹${y.amount_limit.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                            : `₹${y.left_to_spend.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} left of ₹${y.amount_limit.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
                         return `
                         <div class="bg-surface-dark rounded-xl border border-border-dark overflow-hidden transition-all text-left">
@@ -2070,7 +2188,7 @@
                                 ${y.l2_breakdown.length ? y.l2_breakdown.map(l2 => `
                                     <div class="flex items-center justify-between text-xs font-semibold py-0.5">
                                         <span class="text-text-secondary">${l2.name}</span>
-                                        <span>₹${l2.spend.toLocaleString('en-IN', {minimumFractionDigits:2})}</span>
+                                        <span>₹${l2.spend.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
                                     </div>
                                 `).join('') : '<p class="text-xs text-text-secondary italic text-center py-1">No transaction data in this year</p>'}
                             </div>
@@ -2106,14 +2224,14 @@
                 document.getElementById('budgetModalTitle').textContent = "Add Budget Limit";
                 document.getElementById('budgetL1SelectWrap').classList.remove('hidden');
                 document.getElementById('budgetL1StaticWrap').classList.add('hidden');
-                
+
                 // Populate L1 options not already configured
                 const select = document.getElementById('budgetL1Name');
                 select.innerHTML = '';
-                
+
                 const configured = this.budgetState.loadedProgress.map(p => p.l1_category_name);
                 const l1Cats = getL1Categories();
-                
+
                 l1Cats.forEach(c => {
                     if (!configured.includes(c.name)) {
                         const opt = document.createElement('option');
@@ -2184,4 +2302,5 @@
         router.render();
     </script>
 </body>
+
 </html>

@@ -47,10 +47,20 @@ async def dashboard(
     from sqlalchemy import func
     eff_date_expr = func.coalesce(func.strftime("%Y-%m-%d", Transaction.mapping_date), Transaction.parsed_date)
 
-    all_dates = db.query(eff_date_expr.label("eff_date")).filter(
+    raw_dates = db.query(eff_date_expr.label("eff_date")).filter(
         eff_date_expr.isnot(None)
     ).distinct().all()
-    all_years = sorted(set(d[0][:4] for d in all_dates if d[0]), reverse=True)
+
+    valid_years = set()
+    for d in raw_dates:
+        if d and d[0]:
+            val = str(d[0]).strip()
+            if len(val) >= 4 and val[:4].isdigit():
+                y = int(val[:4])
+                if 2000 <= y <= 2099:
+                    valid_years.add(y)
+
+    all_years = sorted(valid_years, reverse=True)
     all_account_types = [
         r[0] for r in db.query(Transaction.account_type).distinct().filter(
             Transaction.account_type.isnot(None)
@@ -78,9 +88,11 @@ async def dashboard(
     # ── Build FY options ──────────────────────────────────────────────────
     fy_options = []
     if all_years:
-        min_year = min(int(y) for y in all_years)
-        max_year = max(int(y) for y in all_years)
-        for start_year in range(max_year, min_year - 2, -1):
+        min_year = min(all_years)
+        max_year = max(all_years)
+        # Cap FY options loop depth to max 15 years to prevent unbounded loops
+        min_start = max(min_year - 1, max_year - 15)
+        for start_year in range(max_year, min_start - 1, -1):
             fy_label = f"FY {str(start_year)[-2:]}-{str(start_year + 1)[-2:]}"
             fy_from = f"{start_year}-04"
             fy_to = f"{start_year + 1}-03"
