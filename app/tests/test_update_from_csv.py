@@ -32,12 +32,12 @@ class UpdateFromCsvAmountTests(unittest.TestCase):
         self.assertEqual(derived["flow_direction"], "debit")
 
     def test_invalid_money_value_fails_instead_of_becoming_zero(self):
-        with self.assertRaisesRegex(ValueError, "Credit must be a valid number"):
-            normalize_amount("not-a-number", field_name="Credit", row_number=2)
+        with self.assertRaisesRegex(ValueError, "credit must be a valid number"):
+            normalize_amount("not-a-number", field_name="credit", row_number=2)
 
     def test_non_finite_money_value_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "finite, non-negative"):
-            normalize_amount("NaN", field_name="Credit", row_number=2)
+            normalize_amount("NaN", field_name="credit", row_number=2)
 
     def test_debit_and_credit_cannot_both_be_positive(self):
         with self.assertRaisesRegex(ValueError, "cannot both"):
@@ -79,10 +79,10 @@ class UpdateFromCsvAmountTests(unittest.TestCase):
             [{
                 "raw_date": "03-Mar-25",
                 "raw_details": "Salary",
-                "Debit": "0",
-                "Credit": "1250.50",
-                "AccountName": "Primary",
-                "AccountType": "Savings",
+                "debit": "0",
+                "credit": "1250.50",
+                "account_name": "Primary",
+                "account_type": "Savings",
                 "filename": "test.csv",
             }],
             {},

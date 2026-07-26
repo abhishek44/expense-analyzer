@@ -12,7 +12,7 @@ from app.config import settings
 from app.models import Transaction
 from ml_model.preprocessing import extract_merchant, normalize_merchant, clean_transaction_text, PLATFORM_MERCHANTS
 
-REQUIRED_CSV_COLUMNS = {"Date", "Details", "Debit", "Credit", "AccountName", "AccountType"}
+REQUIRED_CSV_COLUMNS = {"raw_date", "raw_details", "debit", "credit", "account_name", "account_type"}
 
 
 def parse_csv_content(content: bytes) -> tuple[list[str], list[dict[str, str]]]:
@@ -158,12 +158,12 @@ def process_transaction_csv(
     transactions_to_insert = []
 
     for row in rows:
-        raw_date = (row.get("Date") or "").strip()
-        raw_details = (row.get("Details") or "").strip()
-        debit = parse_float(row.get("Debit", ""))
-        credit = parse_float(row.get("Credit", ""))
-        acc_name = (row.get("AccountName") or "").strip() or account_name or None
-        acc_type = (row.get("AccountType") or "").strip() or None
+        raw_date = (row.get("raw_date") or "").strip()
+        raw_details = (row.get("raw_details") or "").strip()
+        debit = parse_float(row.get("debit", ""))
+        credit = parse_float(row.get("credit", ""))
+        acc_name = (row.get("account_name") or "").strip() or account_name or None
+        acc_type = (row.get("account_type") or "").strip() or None
 
         derived = compute_derived_fields(raw_date, raw_details, debit, credit)
 

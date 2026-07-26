@@ -21,6 +21,7 @@ async def dashboard(
     date_from: Optional[str] = Query(None, description="Start month YYYY-MM"),
     date_to: Optional[str] = Query(None, description="End month YYYY-MM"),
     account_type: Optional[str] = Query(None, description="Savings or CreditCard"),
+    account_name: Optional[str] = Query(None, description="Specific account name"),
     categories: Optional[str] = Query(None, description="Comma-separated L1 category names"),
     db: Session = Depends(get_db),
 ) -> dict:
@@ -43,8 +44,11 @@ async def dashboard(
         Category.level == 2, Category.is_archived == 0
     ).all()
 
-    all_dates = db.query(Transaction.parsed_date).filter(
-        Transaction.parsed_date.isnot(None)
+    from sqlalchemy import func
+    eff_date_expr = func.coalesce(func.strftime("%Y-%m-%d", Transaction.mapping_date), Transaction.parsed_date)
+
+    all_dates = db.query(eff_date_expr.label("eff_date")).filter(
+        eff_date_expr.isnot(None)
     ).distinct().all()
     all_years = sorted(set(d[0][:4] for d in all_dates if d[0]), reverse=True)
     all_account_types = [
@@ -84,33 +88,34 @@ async def dashboard(
 
     # ── Fetch transactions ────────────────────────────────────────────────
     base_query = db.query(Transaction).filter(
-        Transaction.parsed_date.isnot(None),
+        eff_date_expr.isnot(None),
         Transaction.review_status == ReviewStatus.APPROVED.value
     )
 
     if date_from:
-        base_query = base_query.filter(Transaction.parsed_date >= date_from + "-01")
+        base_query = base_query.filter(eff_date_expr >= date_from + "-01")
     if date_to:
-        base_query = base_query.filter(Transaction.parsed_date <= date_to + "-31")
+        base_query = base_query.filter(eff_date_expr <= date_to + "-31")
     if account_type:
-        from sqlalchemy import func
         # Normalize incoming request value to check match
         norm_type = account_type.lower().replace(" ", "").replace("_", "")
         # Normalize DB values for matching
         base_query = base_query.filter(
             func.lower(func.replace(func.replace(Transaction.account_type, " ", ""), "_", "")) == norm_type
         )
+    if account_name:
+        base_query = base_query.filter(Transaction.account_name.ilike(f"%{account_name}%"))
     if selected_cat_ids:
         base_query = base_query.filter(Transaction.l1_category_id.in_(selected_cat_ids))
 
     all_txns = base_query.with_entities(
-        Transaction.parsed_date,
+        eff_date_expr.label("eff_date"),
         Transaction.debit,
         Transaction.credit,
         Transaction.account_type,
         Transaction.l1_category_id,
         Transaction.l2_category_id,
-    ).order_by(Transaction.parsed_date.asc()).all()
+    ).order_by(eff_date_expr.asc()).all()
 
     # ── Compute everything in a single pass ───────────────────────────────
     # Primary account types to show in pivot table columns
@@ -147,7 +152,7 @@ async def dashboard(
     non_expense_l1_names = {"Financial", "Income"}
 
     for t in all_txns:
-        month_key = t.parsed_date[:7]
+        month_key = t.eff_date[:7]
         debit = t.debit or 0.0
         credit = t.credit or 0.0
         l1_name = l1_id_to_name.get(t.l1_category_id, "Uncategorized")

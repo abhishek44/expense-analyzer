@@ -35,9 +35,10 @@ DEFAULT_CSV_FILENAMES = ("updated_transaction.csv", "updated_transactions.csv")
 
 # These source columns are needed to rebuild a transaction accurately. Derived
 # columns (including amount and flow_direction) are intentionally not imported.
+# id,raw_date,raw_details,debit,credit,account_name,account_type,filename,notes,amount,flow_direction,parsed_date,merchant_name,cleaned_details,l1_category_name,l2_category_name,categorised_by,review_status,reviewed_at,statement_date,mapping_date
 REQUIRED_COLUMNS = {
-    "raw_date", "raw_details", "Debit", "Credit",
-    "AccountName", "AccountType", "filename",
+    "raw_date", "raw_details", "debit", "credit",
+    "account_name", "account_type", "filename"
 }
 
 # Supported date formats for flexible parsing
@@ -66,7 +67,7 @@ def validate_transaction_amounts(
     debit: float | None, credit: float | None, *, row_number: int
 ) -> None:
     """Reject ambiguous rows rather than choosing an arbitrary signed amount."""
-    for field_name, value in (("Debit", debit), ("Credit", credit)):
+    for field_name, value in (("debit", debit), ("credit", credit)):
         if value is not None and (not math.isfinite(value) or value < 0):
             raise ValueError(
                 f"Row {row_number}: {field_name} must be a finite, non-negative number"
@@ -125,8 +126,8 @@ def read_csv(path: Path) -> list[dict]:
 def validate_rows(rows: list[dict]) -> None:
     """Validate all financial inputs before a refresh can alter the database."""
     for row_number, row in enumerate(rows, start=2):  # account for CSV header
-        debit = normalize_amount(row.get("Debit"), field_name="Debit", row_number=row_number)
-        credit = normalize_amount(row.get("Credit"), field_name="Credit", row_number=row_number)
+        debit = normalize_amount(row.get("debit"), field_name="debit", row_number=row_number)
+        credit = normalize_amount(row.get("credit"), field_name="credit", row_number=row_number)
         validate_transaction_amounts(debit, credit, row_number=row_number)
 
 
@@ -372,13 +373,13 @@ def insert_transactions(session, rows: list[dict],
         raw_details = (row.get("raw_details") or "").strip()
 
         # ── Normalize amounts (round to 2 decimal places) ──
-        debit = normalize_amount(row.get("Debit"), field_name="Debit", row_number=row_number)
-        credit = normalize_amount(row.get("Credit"), field_name="Credit", row_number=row_number)
+        debit = normalize_amount(row.get("debit"), field_name="debit", row_number=row_number)
+        credit = normalize_amount(row.get("credit"), field_name="credit", row_number=row_number)
         validate_transaction_amounts(debit, credit, row_number=row_number)
 
         # ── Normalize text fields ──
-        acc_name = (row.get("AccountName") or "").strip() or None
-        acc_type_raw = (row.get("AccountType") or "").strip()
+        acc_name = (row.get("account_name") or "").strip() or None
+        acc_type_raw = (row.get("account_type") or "").strip()
         acc_type = acc_type_raw.upper() if acc_type_raw else None  # Normalize to UPPERCASE
         filename = (row.get("filename") or "imported").strip()
         notes = (row.get("notes") or "").strip() or None

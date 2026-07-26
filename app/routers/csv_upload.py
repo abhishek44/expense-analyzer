@@ -30,21 +30,62 @@ class ReviewRequest(BaseModel):
 
 
 class TransactionUpdate(BaseModel):
-    notes: Optional[str] = None
+    raw_date: Optional[str] = None
+    raw_details: Optional[str] = None
+    debit: Optional[float] = None
+    credit: Optional[float] = None
     account_name: Optional[str] = None
     account_type: Optional[str] = None
+    l1_category_id: Optional[str] = None
+    l2_category_id: Optional[str] = None
+    notes: Optional[str] = None
+    statement_date: Optional[str] = None
+    mapping_date: Optional[str] = None
+    review_status: Optional[str] = None
 
 
 class ManualTransactionRequest(BaseModel):
-    Date: Optional[str] = None
-    Details: str
-    Debit: Optional[float] = None
-    Credit: Optional[float] = None
-    Account_name: str
-    Account_type: str
+    raw_date: Optional[str] = None
+    raw_details: Optional[str] = None
+    debit: Optional[float] = None
+    credit: Optional[float] = None
+    account_name: Optional[str] = None
+    account_type: Optional[str] = None
     l1_category_id: Optional[str] = None
     l2_category_id: Optional[str] = None
+    notes: Optional[str] = None
+    statement_date: Optional[str] = None
+    mapping_date: Optional[str] = None
+
+    # Legacy fields for backward compatibility
+    Date: Optional[str] = None
+    Details: Optional[str] = None
+    Debit: Optional[float] = None
+    Credit: Optional[float] = None
+    Account_name: Optional[str] = None
+    Account_type: Optional[str] = None
     Notes: Optional[str] = None
+
+    def get_date(self) -> str:
+        return self.raw_date or self.Date or datetime.now().strftime("%Y-%m-%d")
+
+    def get_details(self) -> str:
+        return self.raw_details or self.Details or "Manual entry"
+
+    def get_debit(self) -> Optional[float]:
+        return self.debit if self.debit is not None else self.Debit
+
+    def get_credit(self) -> Optional[float]:
+        return self.credit if self.credit is not None else self.Credit
+
+    def get_account_name(self) -> str:
+        return self.account_name or self.Account_name or "Cash"
+
+    def get_account_type(self) -> str:
+        return self.account_type or self.Account_type or "Savings"
+
+    def get_notes(self) -> Optional[str]:
+        return self.notes or self.Notes
 
 
 # ── Upload ─────────────────────────────────────────────────────────────────────
@@ -162,7 +203,7 @@ async def get_transactions(
     total = query.count()
     records = (
         query.options(joinedload(Transaction.l1_category), joinedload(Transaction.l2_category))
-        .order_by(Transaction.id.desc())
+        .order_by(Transaction.parsed_date.desc(), Transaction.id.desc())
         .offset(skip)
         .limit(limit)
         .all()
@@ -191,15 +232,47 @@ async def get_transaction(transaction_id: int, db: Session = Depends(get_db)) ->
     return t.to_dict()
 
 
+def parse_date_obj(val: Optional[str]):
+    if not val:
+        return None
+    try:
+        return datetime.strptime(val.strip(), "%Y-%m-%d").date()
+    except (ValueError, AttributeError):
+        return None
+
+
 @router.patch("/transactions/{transaction_id}", summary="Update transaction")
 async def update_transaction(transaction_id: int, update_data: TransactionUpdate, db: Session = Depends(get_db)) -> dict:
+    from app.services.csv_service import compute_derived_fields
+
     t = db.query(Transaction).filter(Transaction.id == transaction_id).first()
     if not t:
         raise HTTPException(status_code=404, detail="Transaction not found")
 
     update_dict = update_data.model_dump(exclude_unset=True)
+
+    # Check if raw financial / date fields are being updated
+    new_raw_date = update_dict.get("raw_date", t.raw_date)
+    new_raw_details = update_dict.get("raw_details", t.raw_details)
+    new_debit = update_dict.get("debit", t.debit)
+    new_credit = update_dict.get("credit", t.credit)
+
+    if any(k in update_dict for k in ("raw_date", "raw_details", "debit", "credit")):
+        derived = compute_derived_fields(new_raw_date, new_raw_details, new_debit, new_credit)
+        for k, v in derived.items():
+            setattr(t, k, v)
+
     for field, value in update_dict.items():
-        setattr(t, field, value)
+        if field in ("statement_date", "mapping_date"):
+            setattr(t, field, parse_date_obj(value))
+        else:
+            setattr(t, field, value)
+
+    if "l1_category_id" in update_dict and update_dict["l1_category_id"]:
+        t.categorised_by = CategorisedBy.USER.value
+        if "review_status" not in update_dict:
+            t.review_status = ReviewStatus.APPROVED.value
+        t.reviewed_at = datetime.now()
 
     db.commit()
     db.refresh(t)
@@ -308,10 +381,10 @@ async def get_merchant_suggestion(transaction_id: int, db: Session = Depends(get
 async def create_transaction(data: ManualTransactionRequest, db: Session = Depends(get_db)) -> dict:
     from app.services.csv_service import compute_derived_fields
 
-    raw_date = data.Date or datetime.now().strftime("%Y-%m-%d")
-    raw_details = data.Details
-    debit = data.Debit
-    credit = data.Credit
+    raw_date = data.get_date()
+    raw_details = data.get_details()
+    debit = data.get_debit()
+    credit = data.get_credit()
 
     derived = compute_derived_fields(raw_date, raw_details, debit, credit)
 
@@ -320,11 +393,13 @@ async def create_transaction(data: ManualTransactionRequest, db: Session = Depen
         raw_details=raw_details,
         debit=debit,
         credit=credit,
-        account_name=data.Account_name,
-        account_type=data.Account_type,
+        account_name=data.get_account_name(),
+        account_type=data.get_account_type(),
         filename="manual_entry",
         uploaded_at=datetime.now(),
-        notes=data.Notes,
+        notes=data.get_notes(),
+        statement_date=parse_date_obj(data.statement_date),
+        mapping_date=parse_date_obj(data.mapping_date),
         l1_category_id=data.l1_category_id,
         l2_category_id=data.l2_category_id,
         categorised_by=CategorisedBy.USER.value if data.l1_category_id else None,
@@ -384,7 +459,7 @@ async def clear_table(table_name: str, db: Session = Depends(get_db)) -> dict:
 # ── Export ─────────────────────────────────────────────────────────────────────
 
 EXPORT_HEADERS = [
-    "id", "raw_date", "raw_details", "Debit", "Credit", "AccountName", "AccountType",
+    "id", "raw_date", "statement_date", "mapping_date", "raw_details", "debit", "credit", "account_name", "account_type",
     "filename", "notes", "amount", "flow_direction", "parsed_date",
     "merchant_name", "cleaned_details", "l1_category_name", "l2_category_name",
     "categorised_by", "review_status", "reviewed_at",
@@ -396,7 +471,7 @@ async def export_transactions(db: Session = Depends(get_db)):
     transactions = (
         db.query(Transaction)
         .options(joinedload(Transaction.l1_category), joinedload(Transaction.l2_category))
-        .order_by(Transaction.id.asc())
+        .order_by(Transaction.parsed_date.desc(), Transaction.id.desc())
         .all()
     )
     if not transactions:
@@ -412,6 +487,8 @@ async def export_transactions(db: Session = Depends(get_db)):
         writer.writerow([
             t.id,
             t.raw_date or "",
+            t.statement_date.isoformat() if t.statement_date else "",
+            t.mapping_date.isoformat() if t.mapping_date else "",
             t.raw_details or "",
             t.debit if t.debit is not None else "",
             t.credit if t.credit is not None else "",
@@ -483,11 +560,13 @@ async def import_transactions(
     for row in rows:
         row_id = row.get("id", "").strip()
         raw_date = (row.get("raw_date") or "").strip()
+        stmt_date = parse_date_obj(row.get("statement_date"))
+        map_date = parse_date_obj(row.get("mapping_date"))
         raw_details = (row.get("raw_details") or "").strip()
-        debit = parse_float(row.get("Debit", ""))
-        credit = parse_float(row.get("Credit", ""))
-        acc_name = (row.get("AccountName") or "").strip() or None
-        acc_type = (row.get("AccountType") or "").strip() or None
+        debit = parse_float(row.get("debit", ""))
+        credit = parse_float(row.get("credit", ""))
+        acc_name = (row.get("account_name") or "").strip() or None
+        acc_type = (row.get("account_type") or "").strip() or None
         notes = (row.get("notes") or "").strip() or None
         filename = (row.get("filename") or "imported").strip()
         l1_cat_name = (row.get("l1_category_name") or "").strip()
@@ -518,6 +597,8 @@ async def import_transactions(
             t = db.query(Transaction).filter(Transaction.id == int(row_id)).first()
             if t:
                 t.raw_date = raw_date
+                t.statement_date = stmt_date
+                t.mapping_date = map_date
                 t.raw_details = raw_details
                 t.debit = debit
                 t.credit = credit
@@ -539,6 +620,8 @@ async def import_transactions(
         # Insert new record
         t = Transaction(
             raw_date=raw_date,
+            statement_date=stmt_date,
+            mapping_date=map_date,
             raw_details=raw_details,
             debit=debit,
             credit=credit,

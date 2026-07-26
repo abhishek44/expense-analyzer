@@ -144,6 +144,9 @@
             async createTransaction(data) {
                 return (await fetch(`${API_BASE}/transactions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) })).json();
             },
+            async updateTransaction(id, data) {
+                return (await fetch(`${API_BASE}/transactions/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) })).json();
+            },
             async getAccounts() { return (await fetch(`${API_BASE}/accounts`)).json(); },
             async createAccount(data) { return (await fetch(`${API_BASE}/accounts`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) })).json(); },
             async updateAccount(id, data) { return (await fetch(`${API_BASE}/accounts/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) })).json(); },
@@ -153,11 +156,12 @@
             async updateCategory(id, data) { return (await fetch(`${API_BASE}/categories/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) })).json(); },
             async deleteCategory(id) { const r = await fetch(`${API_BASE}/categories/${id}`, { method: 'DELETE' }); return r.status === 204 ? { success: true } : r.json(); },
             async getMerchantSuggestion(id) { return (await fetch(`${API_BASE}/merchant-suggestion/${id}`)).json(); },
-            async getAnalyticsDashboard(dateFrom, dateTo, accountType, categories) {
+            async getAnalyticsDashboard(dateFrom, dateTo, accountType, categories, accountName) {
                 let url = `${API_BASE}/analytics/dashboard?`;
                 if (dateFrom) url += `date_from=${encodeURIComponent(dateFrom)}&`;
                 if (dateTo) url += `date_to=${encodeURIComponent(dateTo)}&`;
                 if (accountType) url += `account_type=${encodeURIComponent(accountType)}&`;
+                if (accountName) url += `account_name=${encodeURIComponent(accountName)}&`;
                 if (categories && categories.length) url += `categories=${encodeURIComponent(categories.join(','))}&`;
                 return (await fetch(url)).json();
             }
@@ -411,11 +415,10 @@
                             </div>
                             <div class="flex-1 min-w-[160px]">
                                 <label class="text-xs text-text-secondary block mb-1">Account</label>
-                                <div class="flex h-8 rounded-lg overflow-hidden border border-border-dark">
-                                    <button onclick="screens.setRecAccountType('')" id="recAccAll" class="rec-acc-btn flex-1 text-xs font-semibold px-2">All</button>
-                                    <button onclick="screens.setRecAccountType('Savings')" id="recAccSavings" class="rec-acc-btn flex-1 text-xs font-semibold px-2 border-x border-border-dark">Savings</button>
-                                    <button onclick="screens.setRecAccountType('CreditCard')" id="recAccCC" class="rec-acc-btn flex-1 text-xs font-semibold px-2">Credit Card</button>
-                                </div>
+                                <select id="recAccountSelect" onchange="screens.onRecAccountChange(this.value)"
+                                    class="w-full h-8 px-2 rounded-lg bg-surface-dark border border-border-dark text-xs truncate">
+                                    <option value="">All Accounts</option>
+                                </select>
                             </div>
                             <div class="flex-1 min-w-[140px] cat-dropdown">
                                 <label class="text-xs text-text-secondary block mb-1">Category</label>
@@ -475,7 +478,7 @@
 
                 await this.loadRecords();
             },
-            populateRecordsFilterUI(meta) {
+            async populateRecordsFilterUI(meta) {
                 const years = meta.available_years || [2026, 2025];
                 const allMonths = generateMonthOptions(years);
 
@@ -526,9 +529,55 @@
                     `).join('');
                 }
 
-                this.updateRecAccountTypeUI();
+                // Expanded Account dropdown
+                await this.populateSharedAccountDropdown('recAccountSelect');
+
                 this.updateRecCatLabel();
                 this.updateRecResetBtn();
+            },
+            async populateSharedAccountDropdown(selectId) {
+                const accSel = document.getElementById(selectId);
+                if (!accSel) return;
+                try {
+                    const [filterOpts, accData] = await Promise.all([
+                        api.getFilterOptions().catch(() => ({ account_names: [], account_types: [] })),
+                        api.getAccounts().catch(() => ({ accounts: [] })),
+                    ]);
+
+                    const configuredAccounts = accData.accounts || [];
+                    const txAccountNames = filterOpts.account_names || [];
+
+                    const allSpecificNames = [...new Set([
+                        ...configuredAccounts.map(a => a.name),
+                        ...txAccountNames
+                    ])].filter(Boolean).sort();
+
+                    let optionsHtml = '<option value="">All Accounts</option>';
+                    optionsHtml += '<optgroup label="Account Types">';
+                    optionsHtml += '<option value="type:Savings">All Savings Accounts</option>';
+                    optionsHtml += '<option value="type:CreditCard">All Credit Cards</option>';
+                    optionsHtml += '</optgroup>';
+
+                    if (allSpecificNames.length > 0) {
+                        optionsHtml += '<optgroup label="Specific Accounts">';
+                        allSpecificNames.forEach(name => {
+                            optionsHtml += `<option value="name:${esc(name)}">${esc(name)}</option>`;
+                        });
+                        optionsHtml += '</optgroup>';
+                    }
+
+                    accSel.innerHTML = optionsHtml;
+
+                    if (appState.filters.accountName) {
+                        accSel.value = `name:${appState.filters.accountName}`;
+                    } else if (appState.filters.accountType) {
+                        accSel.value = `type:${appState.filters.accountType}`;
+                    } else {
+                        accSel.value = '';
+                    }
+                } catch (e) {
+                    console.error(`Error populating ${selectId}:`, e);
+                }
             },
             setRecFY(from, to) {
                 appState.filters.dateFrom = from;
@@ -536,20 +585,18 @@
                 if (appState.analyticsMeta) this.populateRecordsFilterUI(appState.analyticsMeta);
                 this.loadRecords();
             },
-            setRecAccountType(type) {
-                appState.filters.accountType = type;
-                this.updateRecAccountTypeUI();
+            onRecAccountChange(val) {
+                if (val.startsWith('type:')) {
+                    appState.filters.accountType = val.replace('type:', '');
+                    appState.filters.accountName = '';
+                } else if (val.startsWith('name:')) {
+                    appState.filters.accountName = val.replace('name:', '');
+                    appState.filters.accountType = '';
+                } else {
+                    appState.filters.accountType = '';
+                    appState.filters.accountName = '';
+                }
                 this.onRecordsFilterChange();
-            },
-            updateRecAccountTypeUI() {
-                document.querySelectorAll('.rec-acc-btn').forEach(btn => {
-                    btn.classList.remove('bg-primary', 'text-white');
-                    btn.classList.add('bg-surface-dark', 'text-text-secondary');
-                });
-                const type = appState.filters.accountType;
-                const activeId = type === 'Savings' ? 'recAccSavings' : type === 'CreditCard' ? 'recAccCC' : 'recAccAll';
-                const active = document.getElementById(activeId);
-                if (active) { active.classList.add('bg-primary', 'text-white'); active.classList.remove('bg-surface-dark', 'text-text-secondary'); }
             },
             toggleRecCatDropdown() {
                 document.getElementById('recCatMenu')?.classList.toggle('open');
@@ -585,6 +632,7 @@
                 appState.filters.dateFrom = '';
                 appState.filters.dateTo = '';
                 appState.filters.accountType = '';
+                appState.filters.accountName = '';
                 appState.filters.categories = [];
                 appState.filters.search = '';
                 appState.filters.filename = '';
@@ -596,8 +644,8 @@
             updateRecResetBtn() {
                 const btn = document.getElementById('recResetBtn');
                 if (!btn) return;
-                const { dateFrom, dateTo, accountType, categories, search, filename } = appState.filters;
-                const has = dateFrom || dateTo || accountType || categories.length > 0 || search || filename;
+                const { dateFrom, dateTo, accountType, accountName, categories, search, filename } = appState.filters;
+                const has = dateFrom || dateTo || accountType || accountName || categories.length > 0 || search || filename;
                 btn.classList.toggle('hidden', !has);
                 btn.classList.toggle('flex', has);
             },
@@ -677,11 +725,10 @@
                             </div>
                             <div class="flex-1 min-w-[180px]">
                                 <label class="text-xs text-text-secondary block mb-1">Account</label>
-                                <div class="flex h-9 rounded-lg overflow-hidden border border-border-dark">
-                                    <button onclick="screens.setAnAccountType('')" id="anAccAll" class="an-acc-btn flex-1 text-sm font-semibold px-2">All</button>
-                                    <button onclick="screens.setAnAccountType('Savings')" id="anAccSavings" class="an-acc-btn flex-1 text-sm font-semibold px-2 border-x border-border-dark">Savings</button>
-                                    <button onclick="screens.setAnAccountType('CreditCard')" id="anAccCC" class="an-acc-btn flex-1 text-sm font-semibold px-2">Credit Card</button>
-                                </div>
+                                <select id="anAccountSelect" onchange="screens.onAnAccountChange(this.value)"
+                                    class="w-full h-9 px-3 rounded-lg bg-surface-dark border border-border-dark text-sm truncate">
+                                    <option value="">All Accounts</option>
+                                </select>
                             </div>
                             <div class="flex-1 min-w-[180px] cat-dropdown">
                                 <label class="text-xs text-text-secondary block mb-1">Categories</label>
@@ -730,9 +777,9 @@
                 if (!content) return;
                 content.innerHTML = '<div class="flex justify-center py-16"><div class="w-8 h-8 border-2 border-primary/30 border-t-primary rounded-full animate-spin"></div></div>';
 
-                const { dateFrom, dateTo, accountType, categories } = appState.filters;
+                const { dateFrom, dateTo, accountType, accountName, categories } = appState.filters;
                 try {
-                    const data = await api.getAnalyticsDashboard(dateFrom, dateTo, accountType, categories);
+                    const data = await api.getAnalyticsDashboard(dateFrom, dateTo, accountType, categories, accountName);
                     appState.analyticsMeta = data.filters;
                     this.populateAnalyticsFilterUI(data.filters);
                     this.destroyAnalyticsCharts();
@@ -741,7 +788,7 @@
                     content.innerHTML = `<div class="text-center py-16 text-red-400"><p class="font-bold">Failed to load analytics</p><p class="text-sm mt-1">${e.message}</p></div>`;
                 }
             },
-            populateAnalyticsFilterUI(meta) {
+            async populateAnalyticsFilterUI(meta) {
                 const years = meta.available_years || [2026, 2025];
                 const allMonths = generateMonthOptions(years);
 
@@ -792,7 +839,7 @@
                     `).join('');
                 }
 
-                this.updateAnAccountTypeUI();
+                await this.populateSharedAccountDropdown('anAccountSelect');
                 this.updateAnCatLabel();
                 this.updateAnResetBtn();
             },
@@ -802,20 +849,18 @@
                 if (appState.analyticsMeta) this.populateAnalyticsFilterUI(appState.analyticsMeta);
                 this.loadAnalyticsData();
             },
-            setAnAccountType(type) {
-                appState.filters.accountType = type;
-                this.updateAnAccountTypeUI();
+            onAnAccountChange(val) {
+                if (val.startsWith('type:')) {
+                    appState.filters.accountType = val.replace('type:', '');
+                    appState.filters.accountName = '';
+                } else if (val.startsWith('name:')) {
+                    appState.filters.accountName = val.replace('name:', '');
+                    appState.filters.accountType = '';
+                } else {
+                    appState.filters.accountType = '';
+                    appState.filters.accountName = '';
+                }
                 this.onAnalyticsFilterChange();
-            },
-            updateAnAccountTypeUI() {
-                document.querySelectorAll('.an-acc-btn').forEach(btn => {
-                    btn.classList.remove('bg-primary', 'text-white');
-                    btn.classList.add('bg-surface-dark', 'text-text-secondary');
-                });
-                const type = appState.filters.accountType;
-                const activeId = type === 'Savings' ? 'anAccSavings' : type === 'CreditCard' ? 'anAccCC' : 'anAccAll';
-                const active = document.getElementById(activeId);
-                if (active) { active.classList.add('bg-primary', 'text-white'); active.classList.remove('bg-surface-dark', 'text-text-secondary'); }
             },
             toggleAnCatDropdown() {
                 document.getElementById('anCatMenu')?.classList.toggle('open');
@@ -851,6 +896,7 @@
                 appState.filters.dateFrom = '';
                 appState.filters.dateTo = '';
                 appState.filters.accountType = '';
+                appState.filters.accountName = '';
                 appState.filters.categories = [];
                 if (appState.analyticsMeta) this.populateAnalyticsFilterUI(appState.analyticsMeta);
                 this.loadAnalyticsData();
@@ -858,8 +904,8 @@
             updateAnResetBtn() {
                 const btn = document.getElementById('anResetBtn');
                 if (!btn) return;
-                const { dateFrom, dateTo, accountType, categories } = appState.filters;
-                const has = dateFrom || dateTo || accountType || categories.length > 0;
+                const { dateFrom, dateTo, accountType, accountName, categories } = appState.filters;
+                const has = dateFrom || dateTo || accountType || accountName || categories.length > 0;
                 btn.classList.toggle('hidden', !has);
                 btn.classList.toggle('flex', has);
             },
@@ -889,40 +935,6 @@
                             <p class="text-2xl font-extrabold ${kpi.savings_rate >= 0 ? 'text-green-400' : 'text-red-400'}">${kpi.savings_rate.toFixed(2)}%</p>
                             <p class="text-xs text-text-secondary mt-1">Net Savings / Income</p>
                         </div>
-                    </div>
-
-                    <!-- CC Reconciliation -->
-                    <div class="chart-card">
-                        <div class="flex items-center gap-2 mb-3">
-                            <span class="material-symbols-outlined text-lg ${cc_reconciliation.status === 'balanced' ? 'text-green-400' : 'text-yellow-400'}">
-                                ${cc_reconciliation.status === 'balanced' ? 'check_circle' : 'warning'}
-                            </span>
-                            <h3 class="font-bold">CC Bill Reconciliation</h3>
-                            <span class="text-xs px-2 py-0.5 rounded-full font-semibold ${cc_reconciliation.status === 'balanced' ? 'bg-green-900/30 text-green-400' : 'bg-yellow-900/30 text-yellow-400'}">
-                                ${cc_reconciliation.status === 'balanced' ? 'Balanced' : 'Unbalanced'}
-                            </span>
-                        </div>
-                        <div class="grid grid-cols-3 gap-4 text-center">
-                            <div>
-                                <p class="text-xs text-text-secondary mb-1">Paid (Debits)</p>
-                                <p class="text-lg font-bold text-red-400">${fmt(cc_reconciliation.total_debits)}</p>
-                            </div>
-                            <div>
-                                <p class="text-xs text-text-secondary mb-1">Received (Credits)</p>
-                                <p class="text-lg font-bold text-green-400">${fmt(cc_reconciliation.total_credits)}</p>
-                            </div>
-                            <div>
-                                <p class="text-xs text-text-secondary mb-1">Difference</p>
-                                <p class="text-lg font-bold ${Math.abs(cc_reconciliation.difference) < 1 ? 'text-green-400' : 'text-yellow-400'}">
-                                    ${cc_reconciliation.difference >= 0 ? '+' : '-'}${fmt(cc_reconciliation.difference)}
-                                </p>
-                            </div>
-                        </div>
-                        ${Math.abs(cc_reconciliation.difference) >= 1 ? `
-                        <p class="text-xs text-yellow-400/80 mt-3 flex items-center gap-1">
-                            <span class="material-symbols-outlined text-sm">info</span>
-                            Non-zero difference may indicate transactions not recorded on one side
-                        </p>` : ''}
                     </div>
 
                     <!-- Pivot Table -->
@@ -1254,17 +1266,18 @@
                 });
             },
 
-            // ─── Transaction Details / Review ─────────────────────────────────
+            // ─── Transaction Details / Edit Expense ────────────────────────────
             details(id) {
                 return `
                 <div class="flex flex-col min-h-screen max-w-6xl mx-auto w-full">
                     <header class="flex items-center p-4 border-b border-border-dark">
                         <button onclick="router.navigate('records')" class="p-2 -ml-2 rounded-full hover:bg-gray-700"><span class="material-symbols-outlined">arrow_back</span></button>
-                        <h1 class="text-lg font-bold ml-2">Transaction Details</h1>
+                        <h1 class="text-lg font-bold ml-2">Edit Transaction</h1>
                     </header>
                     <main id="detailsContent" class="flex-1 p-4 pb-32"><div class="flex justify-center py-8"><div class="size-8 border-2 border-primary/30 border-t-primary rounded-full animate-spin"></div></div></main>
-                    <footer id="detailsFooter" class="fixed bottom-0 left-0 right-0 p-4 pb-8 bg-background-dark border-t border-border-dark hidden max-w-6xl mx-auto">
-                        <button id="approveBtn" class="w-full h-12 bg-primary text-white font-bold rounded-xl flex items-center justify-center gap-2"><span class="material-symbols-outlined">check</span> Review</button>
+                    <footer id="detailsFooter" class="fixed bottom-0 left-0 right-0 p-4 pb-8 bg-background-dark border-t border-border-dark hidden max-w-6xl mx-auto flex gap-3">
+                        <button id="deleteBtn" class="flex-1 h-12 bg-red-900/30 text-red-500 font-bold rounded-xl flex items-center justify-center gap-2 border border-red-800/40"><span class="material-symbols-outlined">delete</span> Delete</button>
+                        <button id="approveBtn" class="flex-[2] h-12 bg-primary text-white font-bold rounded-xl flex items-center justify-center gap-2"><span class="material-symbols-outlined">save</span> Save Changes</button>
                     </footer>
                 </div>`;
             },
@@ -1272,52 +1285,112 @@
                 const content = document.getElementById('detailsContent');
                 const footer = document.getElementById('detailsFooter');
                 try {
-                    const [t, suggestion] = await Promise.all([api.getTransaction(id), api.getMerchantSuggestion(id)]);
-                    const isPending = t.review_status === 'pending';
-                    const merchantDisplay = t.merchant_name || t.cleaned_details || null;
-                    const notesRequired = suggestion.suggestion?.notes_required || false;
+                    const [t, suggestion, accData] = await Promise.all([
+                        api.getTransaction(id),
+                        api.getMerchantSuggestion(id),
+                        api.getAccounts().catch(() => ({ accounts: [] })),
+                    ]);
 
-                    const amtStr = t.debit ? `- ₹${t.debit.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2})}` : t.credit ? `+ ₹${t.credit.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2})}` : '₹0.00';
-                    const amtClass = t.debit ? 'text-red-400' : t.credit ? 'text-green-400' : 'text-gray-300';
+                    const isPending = t.review_status === 'pending';
+                    const notesRequired = suggestion.suggestion?.notes_required || false;
+                    const loadedAccounts = accData.accounts || [];
+
+                    const rawDateVal = t.parsed_date || (t.raw_date ? (t.raw_date.length === 10 ? t.raw_date : '') : '');
+                    const currentAmount = t.debit || t.credit || 0;
+                    const currentType = t.debit ? 'Debit' : t.credit ? 'Credit' : (t.flow_direction === 'credit' ? 'Credit' : 'Debit');
 
                     content.innerHTML = `
                         <div class="space-y-4">
-                            <div class="bg-surface-dark p-4 rounded-xl border border-border-dark">
-                                ${merchantDisplay ? `<p class="text-xl font-bold capitalize">${esc(merchantDisplay)}</p><p class="text-sm text-text-secondary mt-1">${esc([t.flow_direction, t.account_name].filter(Boolean).join(' • '))}</p>` : `<p class="text-lg font-bold">${esc(t.raw_details || 'Transaction')}</p>`}
-                                <p class="text-2xl font-bold mt-3 ${amtClass}">${amtStr}</p>
-                                <p class="text-sm text-text-secondary mt-1">${esc(t.parsed_date || t.raw_date || '')}</p>
-                            </div>
-
-                            <details class="bg-surface-dark rounded-xl border border-border-dark">
-                                <summary class="p-4 cursor-pointer text-sm font-bold text-text-secondary flex items-center gap-2"><span class="material-symbols-outlined text-base">info</span> Raw Details</summary>
-                                <div class="px-4 pb-4 text-xs font-mono break-all bg-background-dark mx-4 mb-4 p-2 rounded">${esc(t.raw_details || '-')}</div>
-                            </details>
-
-                            <div id="suggestionBanner" class="hidden"></div>
-
-                            <div class="bg-surface-dark p-4 rounded-xl space-y-4 border border-border-dark">
-                                <h3 class="text-sm font-bold text-text-secondary">Review & Categorize</h3>
+                            <!-- Basic Editable Attributes -->
+                            <div class="bg-surface-dark p-4 rounded-xl border border-border-dark space-y-3">
+                                <h3 class="text-sm font-bold text-text-secondary">Transaction Financials</h3>
                                 <div>
-                                    <label class="text-xs text-text-secondary">L1 Category</label>
-                                    <select id="reviewL1" class="w-full h-10 px-3 mt-1 rounded-lg border border-border-dark bg-surface-dark text-sm">
-                                        <option value="">- Select Category -</option>
-                                    </select>
+                                    <label class="text-xs text-text-secondary font-medium">Description / Details</label>
+                                    <input id="editDetails" type="text" value="${esc(t.raw_details || t.merchant_name || '')}" class="w-full h-10 px-3 mt-1 rounded-lg border border-border-dark bg-background-dark text-sm" />
+                                </div>
+                                <div class="grid grid-cols-2 gap-3">
+                                    <div>
+                                        <label class="text-xs text-text-secondary font-medium">Flow Type</label>
+                                        <select id="editType" class="w-full h-10 px-3 mt-1 rounded-lg border border-border-dark bg-background-dark text-sm">
+                                            <option value="Debit" ${currentType === 'Debit' ? 'selected' : ''}>Debit (Expense)</option>
+                                            <option value="Credit" ${currentType === 'Credit' ? 'selected' : ''}>Credit (Income)</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label class="text-xs text-text-secondary font-medium">Amount (₹)</label>
+                                        <input id="editAmount" type="number" step="0.01" min="0" value="${currentAmount}" class="w-full h-10 px-3 mt-1 rounded-lg border border-border-dark bg-background-dark text-sm" />
+                                    </div>
                                 </div>
                                 <div>
-                                    <label class="text-xs text-text-secondary">L2 Sub-category (optional)</label>
-                                    <select id="reviewL2" class="w-full h-10 px-3 mt-1 rounded-lg border border-border-dark bg-surface-dark text-sm">
-                                        <option value="">- None -</option>
+                                    <label class="text-xs text-text-secondary font-medium">Account</label>
+                                    <select id="editAccountSelect" class="w-full h-10 px-3 mt-1 rounded-lg border border-border-dark bg-background-dark text-sm">
+                                        <option value="">- Select Account -</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <!-- Dates Metadata -->
+                            <div class="bg-surface-dark p-4 rounded-xl border border-border-dark space-y-3">
+                                <h3 class="text-sm font-bold text-text-secondary">Dates</h3>
+                                <div class="grid grid-cols-3 gap-2">
+                                    <div>
+                                        <label class="text-xs text-text-secondary font-medium">Transaction Date</label>
+                                        <input id="editDate" type="date" value="${esc(rawDateVal)}" class="w-full h-10 px-2 mt-1 rounded-lg border border-border-dark bg-background-dark text-xs" />
+                                    </div>
+                                    <div>
+                                        <label class="text-xs text-text-secondary font-medium">System Date</label>
+                                        <input id="editStatementDate" type="date" value="${esc(t.statement_date || '')}" class="w-full h-10 px-2 mt-1 rounded-lg border border-border-dark bg-background-dark text-xs" />
+                                    </div>
+                                    <div>
+                                        <label class="text-xs text-text-secondary font-medium">Mapping Date</label>
+                                        <input id="editMappingDate" type="date" value="${esc(t.mapping_date || '')}" class="w-full h-10 px-2 mt-1 rounded-lg border border-border-dark bg-background-dark text-xs" />
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Suggestion Banner -->
+                            <div id="suggestionBanner" class="hidden"></div>
+
+                            <!-- Category & Review Status -->
+                            <div class="bg-surface-dark p-4 rounded-xl space-y-3 border border-border-dark">
+                                <h3 class="text-sm font-bold text-text-secondary">Categorization & Status</h3>
+                                <div class="grid grid-cols-2 gap-3">
+                                    <div>
+                                        <label class="text-xs text-text-secondary">Category (L1)</label>
+                                        <select id="reviewL1" class="w-full h-10 px-3 mt-1 rounded-lg border border-border-dark bg-background-dark text-sm">
+                                            <option value="">- Select Category -</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label class="text-xs text-text-secondary">Sub-category (L2)</label>
+                                        <select id="reviewL2" class="w-full h-10 px-3 mt-1 rounded-lg border border-border-dark bg-background-dark text-sm">
+                                            <option value="">- None -</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div>
+                                    <label class="text-xs text-text-secondary">Review Status</label>
+                                    <select id="editStatus" class="w-full h-10 px-3 mt-1 rounded-lg border border-border-dark bg-background-dark text-sm">
+                                        <option value="approved" ${t.review_status === 'approved' ? 'selected' : ''}>Approved</option>
+                                        <option value="pending" ${t.review_status === 'pending' ? 'selected' : ''}>Pending</option>
                                     </select>
                                 </div>
                                 <div>
                                     <label class="text-xs text-text-secondary">Notes</label>
                                     ${notesRequired ? `<p class="text-xs text-yellow-500 mt-0.5 mb-1 flex items-center gap-1"><span class="material-symbols-outlined text-sm">info</span> Ambiguous merchant - a note helps future predictions</p>` : ''}
-                                    <textarea id="reviewNotes" placeholder="${notesRequired ? 'What did you buy?' : 'Optional notes...'}" class="w-full h-16 p-3 mt-1 rounded-lg border ${notesRequired ? 'border-yellow-500/50' : 'border-border-dark'} bg-surface-dark text-sm resize-none"></textarea>
+                                    <textarea id="reviewNotes" placeholder="${notesRequired ? 'What did you buy?' : 'Optional notes...'}" class="w-full h-16 p-3 mt-1 rounded-lg border ${notesRequired ? 'border-yellow-500/50' : 'border-border-dark'} bg-background-dark text-sm resize-none"></textarea>
                                 </div>
                             </div>
-
-                            <button id="deleteBtn" class="w-full h-12 bg-red-900/30 text-red-500 font-bold rounded-xl flex items-center justify-center gap-2"><span class="material-symbols-outlined">delete</span> Delete</button>
                         </div>`;
+
+                    // Populate Account dropdown
+                    const accSelect = document.getElementById('editAccountSelect');
+                    if (loadedAccounts.length > 0) {
+                        accSelect.innerHTML = '<option value="">- Select Account -</option>' +
+                            loadedAccounts.map(a => `<option value="${a.id}" ${a.name === t.account_name ? 'selected' : ''}>${esc(a.name)} (${esc(a.account_type || 'Savings')})</option>`).join('');
+                    } else if (t.account_name) {
+                        accSelect.innerHTML = `<option value="current" selected>${esc(t.account_name)} (${esc(t.account_type || 'Savings')})</option>`;
+                    }
 
                     // Populate L1 dropdown
                     const l1Select = document.getElementById('reviewL1');
@@ -1331,7 +1404,7 @@
                         l1Select.appendChild(opt);
                     });
 
-                    // Cascade: when L1 changes, populate L2
+                    // Cascade L2
                     l1Select.onchange = () => {
                         l2Select.innerHTML = '<option value="">- None -</option>';
                         const children = getL2Children(l1Select.value);
@@ -1353,7 +1426,7 @@
                         const banner = document.getElementById('suggestionBanner');
                         if (s.confidence === 'deterministic') {
                             banner.innerHTML = `<div class="bg-green-900/20 border border-green-800 p-3 rounded-xl flex items-center justify-between">
-                                <div><p class="text-sm font-bold text-green-400">Suggested: ${s.l1_category_name}${s.l2_category_name ? ' > ' + s.l2_category_name : ''}</p><p class="text-xs text-green-500">Based on ${s.occurrence_count} past transactions</p></div>
+                                <div><p class="text-sm font-bold text-green-400">Suggested: ${esc(s.l1_category_name)}${s.l2_category_name ? ' > ' + esc(s.l2_category_name) : ''}</p><p class="text-xs text-green-500">Based on ${s.occurrence_count} past transactions</p></div>
                                 <button onclick="document.getElementById('reviewL1').value='${s.l1_category_id}';document.getElementById('reviewL1').onchange()" class="px-3 py-1.5 bg-green-600 text-white text-xs font-bold rounded-lg">Apply</button>
                             </div>`;
                         } else {
@@ -1363,13 +1436,45 @@
                     }
 
                     footer.classList.remove('hidden');
-                    const approveBtn = document.getElementById('approveBtn');
-                    approveBtn.innerHTML = isPending ? '<span class="material-symbols-outlined">check</span> Review' : '<span class="material-symbols-outlined">update</span> Update';
 
-                    approveBtn.onclick = async () => {
-                        if (!l1Select.value) { alert('Please select a category'); return; }
-                        const data = { l1_category_id: l1Select.value, l2_category_id: l2Select.value || null, notes: notesInput.value || null, review_status: 'approved' };
-                        try { const r = await api.reviewTransaction(id, data); if (r.success) router.navigate('records'); else alert(r.detail || 'Failed'); } catch (e) { alert(e.message); }
+                    document.getElementById('approveBtn').onclick = async () => {
+                        const amountVal = parseFloat(document.getElementById('editAmount').value) || 0;
+                        if (amountVal <= 0) { alert('Please enter a valid amount greater than 0'); return; }
+
+                        const detailsVal = document.getElementById('editDetails').value.trim();
+                        if (!detailsVal) { alert('Please enter transaction details'); return; }
+
+                        const typeVal = document.getElementById('editType').value;
+                        let accNameVal = t.account_name;
+                        let accTypeVal = t.account_type;
+
+                        if (accSelect.value) {
+                            const matchedAcc = loadedAccounts.find(a => a.id === accSelect.value);
+                            if (matchedAcc) {
+                                accNameVal = matchedAcc.name;
+                                accTypeVal = matchedAcc.account_type;
+                            }
+                        }
+
+                        const updateData = {
+                            raw_details: detailsVal,
+                            raw_date: document.getElementById('editDate').value || t.raw_date,
+                            statement_date: document.getElementById('editStatementDate').value || null,
+                            mapping_date: document.getElementById('editMappingDate').value || null,
+                            debit: typeVal === 'Debit' ? amountVal : null,
+                            credit: typeVal === 'Credit' ? amountVal : null,
+                            account_name: accNameVal,
+                            account_type: accTypeVal,
+                            l1_category_id: l1Select.value || null,
+                            l2_category_id: l2Select.value || null,
+                            notes: notesInput.value.trim() || null,
+                            review_status: document.getElementById('editStatus').value,
+                        };
+
+                        try {
+                            const r = await api.updateTransaction(id, updateData);
+                            if (r.success) router.navigate('records'); else alert(r.detail || 'Update failed');
+                        } catch (e) { alert(e.message); }
                     };
 
                     document.getElementById('deleteBtn').onclick = async () => {
@@ -1384,45 +1489,132 @@
                 return `
                 <div class="flex flex-col min-h-screen max-w-6xl mx-auto w-full">
                     <header class="flex items-center p-4 border-b border-border-dark">
-                        <button onclick="router.navigate('home')" class="p-2 -ml-2 rounded-full hover:bg-gray-700"><span class="material-symbols-outlined">arrow_back</span></button>
+                        <button onclick="router.navigate('records')" class="p-2 -ml-2 rounded-full hover:bg-gray-700"><span class="material-symbols-outlined">arrow_back</span></button>
                         <h1 class="text-lg font-bold ml-2">Add Expense</h1>
                     </header>
                     <main class="flex-1 p-4 space-y-4">
-                        <div class="grid grid-cols-2 gap-3">
-                            <div><label class="text-sm font-medium">Date</label><input id="manualDate" type="date" class="w-full h-12 px-4 mt-1 rounded-lg border border-border-dark bg-surface-dark" value="${new Date().toISOString().split('T')[0]}" /></div>
-                            <div><label class="text-sm font-medium">Type</label><select id="manualType" class="w-full h-12 px-4 mt-1 rounded-lg border border-border-dark bg-surface-dark"><option value="Debit">Debit</option><option value="Credit">Credit</option></select></div>
+                        <div class="grid grid-cols-3 gap-2">
+                            <div><label class="text-xs text-text-secondary font-medium">Transaction Date</label><input id="manualDate" type="date" class="w-full h-12 px-2 mt-1 rounded-lg border border-border-dark bg-surface-dark text-xs" value="${new Date().toISOString().split('T')[0]}" /></div>
+                            <div><label class="text-xs text-text-secondary font-medium">System Date</label><input id="manualStatementDate" type="date" class="w-full h-12 px-2 mt-1 rounded-lg border border-border-dark bg-surface-dark text-xs" /></div>
+                            <div><label class="text-xs text-text-secondary font-medium">Mapping Date</label><input id="manualMappingDate" type="date" class="w-full h-12 px-2 mt-1 rounded-lg border border-border-dark bg-surface-dark text-xs" /></div>
                         </div>
-                        <div><label class="text-sm font-medium">Amount</label><input id="manualAmount" type="number" step="0.01" placeholder="0.00" class="w-full h-12 px-4 mt-1 rounded-lg border border-border-dark bg-surface-dark" /></div>
-                        <div><label class="text-sm font-medium">Details</label><input id="manualDetails" type="text" placeholder="Description" class="w-full h-12 px-4 mt-1 rounded-lg border border-border-dark bg-surface-dark" /></div>
                         <div class="grid grid-cols-2 gap-3">
-                            <div><label class="text-sm font-medium">Account</label><input id="manualAccount" type="text" placeholder="HDFC, Cash..." class="w-full h-12 px-4 mt-1 rounded-lg border border-border-dark bg-surface-dark" /></div>
-                            <div><label class="text-sm font-medium">Account Type</label><select id="manualAccountType" class="w-full h-12 px-4 mt-1 rounded-lg border border-border-dark bg-surface-dark"><option value="Savings">Savings</option><option value="Credit Card">Credit Card</option><option value="Current">Current</option><option value="Cash">Cash</option></select></div>
+                            <div><label class="text-xs text-text-secondary font-medium">Flow Type</label><select id="manualType" class="w-full h-12 px-4 mt-1 rounded-lg border border-border-dark bg-surface-dark text-sm"><option value="Debit">Debit (Expense)</option><option value="Credit">Credit (Income)</option></select></div>
+                            <div><label class="text-xs text-text-secondary font-medium">Amount (₹)</label><input id="manualAmount" type="number" step="0.01" min="0.01" placeholder="0.00" class="w-full h-12 px-4 mt-1 rounded-lg border border-border-dark bg-surface-dark text-sm" /></div>
                         </div>
-                        <div><label class="text-sm font-medium">Category</label><select id="manualCategory" class="w-full h-12 px-4 mt-1 rounded-lg border border-border-dark bg-surface-dark"><option value="">- Optional -</option></select></div>
-                        <div><label class="text-sm font-medium">Notes</label><textarea id="manualNotes" class="w-full h-20 p-4 mt-1 rounded-lg border border-border-dark bg-surface-dark resize-none" placeholder="Optional notes..."></textarea></div>
+                        <div><label class="text-xs text-text-secondary font-medium">Details / Description</label><input id="manualDetails" type="text" placeholder="Merchant or item description" class="w-full h-12 px-4 mt-1 rounded-lg border border-border-dark bg-surface-dark text-sm" /></div>
+                        
+                        <div>
+                            <label class="text-xs text-text-secondary font-medium">Account</label>
+                            <select id="manualAccountSelect" class="w-full h-12 px-4 mt-1 rounded-lg border border-border-dark bg-surface-dark text-sm">
+                                <option value="">Loading accounts...</option>
+                            </select>
+                        </div>
+
+                        <div class="grid grid-cols-2 gap-3">
+                            <div>
+                                <label class="text-xs text-text-secondary font-medium">Category (L1)</label>
+                                <select id="manualL1Category" class="w-full h-12 px-4 mt-1 rounded-lg border border-border-dark bg-surface-dark text-sm">
+                                    <option value="">- Optional -</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="text-xs text-text-secondary font-medium">Sub-category (L2)</label>
+                                <select id="manualL2Category" class="w-full h-12 px-4 mt-1 rounded-lg border border-border-dark bg-surface-dark text-sm">
+                                    <option value="">- Select L1 first -</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div><label class="text-xs text-text-secondary font-medium">Notes</label><textarea id="manualNotes" class="w-full h-20 p-4 mt-1 rounded-lg border border-border-dark bg-surface-dark text-sm resize-none" placeholder="Optional notes..."></textarea></div>
                     </main>
-                    <footer class="p-4 pb-8"><button id="saveExpenseBtn" class="w-full h-12 bg-primary text-white font-bold rounded-xl flex items-center justify-center gap-2"><span class="material-symbols-outlined">save</span> Save</button></footer>
+                    <footer class="p-4 pb-8"><button id="saveExpenseBtn" class="w-full h-12 bg-primary text-white font-bold rounded-xl flex items-center justify-center gap-2"><span class="material-symbols-outlined">save</span> Save Expense</button></footer>
                 </div>`;
             },
             async initAddExpense() {
-                const catSelect = document.getElementById('manualCategory');
-                getL1Categories().forEach(c => { const o = document.createElement('option'); o.value = c.id; o.textContent = c.name; catSelect.appendChild(o); });
+                const accSelect = document.getElementById('manualAccountSelect');
+                const l1Select = document.getElementById('manualL1Category');
+                const l2Select = document.getElementById('manualL2Category');
+
+                let loadedAccounts = [];
+
+                try {
+                    const accData = await api.getAccounts();
+                    loadedAccounts = accData.accounts || [];
+                    if (loadedAccounts.length > 0) {
+                        accSelect.innerHTML = '<option value="">- Select Account -</option>' +
+                            loadedAccounts.map(a => `<option value="${a.id}">${esc(a.name)} (${esc(a.account_type || 'Savings')})</option>`).join('');
+                    } else {
+                        accSelect.innerHTML = '<option value="Cash|Cash">Cash (Default)</option>';
+                    }
+                } catch (e) {
+                    console.error('Failed to load accounts for Add Expense:', e);
+                    accSelect.innerHTML = '<option value="Cash|Cash">Cash (Default)</option>';
+                }
+
+                l1Select.innerHTML = '<option value="">- Optional -</option>';
+                getL1Categories().forEach(c => {
+                    const o = document.createElement('option');
+                    o.value = c.id; o.textContent = c.name;
+                    l1Select.appendChild(o);
+                });
+
+                l1Select.onchange = () => {
+                    l2Select.innerHTML = '<option value="">- None -</option>';
+                    if (!l1Select.value) return;
+                    const children = getL2Children(l1Select.value);
+                    children.forEach(ch => {
+                        const o = document.createElement('option');
+                        o.value = ch.id; o.textContent = ch.name;
+                        l2Select.appendChild(o);
+                    });
+                };
 
                 document.getElementById('saveExpenseBtn').onclick = async () => {
                     const amount = parseFloat(document.getElementById('manualAmount').value) || 0;
-                    if (!amount) { alert('Enter amount'); return; }
+                    if (amount <= 0) { alert('Please enter a valid amount greater than 0'); return; }
+
+                    const details = document.getElementById('manualDetails').value.trim();
+                    if (!details) { alert('Please enter transaction details/description'); return; }
+
+                    let accName = 'Cash';
+                    let accType = 'Cash';
+
+                    if (accSelect.value) {
+                        const matched = loadedAccounts.find(a => a.id === accSelect.value);
+                        if (matched) {
+                            accName = matched.name;
+                            accType = matched.account_type;
+                        } else if (accSelect.value.includes('|')) {
+                            [accName, accType] = accSelect.value.split('|');
+                        }
+                    }
+
                     const type = document.getElementById('manualType').value;
                     const data = {
-                        Date: document.getElementById('manualDate').value,
-                        Details: document.getElementById('manualDetails').value || 'Manual entry',
-                        Debit: type === 'Debit' ? amount : null,
-                        Credit: type === 'Credit' ? amount : null,
-                        Account_name: document.getElementById('manualAccount').value || 'Cash',
-                        Account_type: document.getElementById('manualAccountType').value,
-                        l1_category_id: catSelect.value || null,
-                        Notes: document.getElementById('manualNotes').value || null,
+                        raw_date: document.getElementById('manualDate').value,
+                        statement_date: document.getElementById('manualStatementDate').value || null,
+                        mapping_date: document.getElementById('manualMappingDate').value || null,
+                        raw_details: details,
+                        debit: type === 'Debit' ? amount : null,
+                        credit: type === 'Credit' ? amount : null,
+                        account_name: accName,
+                        account_type: accType,
+                        l1_category_id: l1Select.value || null,
+                        l2_category_id: l2Select.value || null,
+                        notes: document.getElementById('manualNotes').value.trim() || null,
                     };
-                    try { const r = await api.createTransaction(data); if (r.success) { alert('Saved!'); router.navigate('records'); } else alert(r.detail || 'Failed'); } catch (e) { alert(e.message); }
+
+                    try {
+                        const r = await api.createTransaction(data);
+                        if (r.success) {
+                            router.navigate('records');
+                        } else {
+                            alert(r.detail || 'Failed to save transaction');
+                        }
+                    } catch (e) {
+                        alert('Error saving transaction: ' + e.message);
+                    }
                 };
             },
 

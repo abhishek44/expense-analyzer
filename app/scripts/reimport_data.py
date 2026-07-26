@@ -72,17 +72,17 @@ def reimport():
 
         imported = 0
         for row in rows:
-            raw_date = (row.get("Date") or "").strip()
-            raw_details = (row.get("Details") or "").strip()
-            debit_str = (row.get("Debit") or "").strip()
-            credit_str = (row.get("Credit") or "").strip()
-            acc_name = (row.get("AccountName") or "").strip() or None
-            acc_type = (row.get("AccountType") or "").strip() or None
-            old_category = (row.get("Category") or "").strip()
-            notes = (row.get("Notes") or "").strip() or None
-            review_status_str = (row.get("ReviewStatus") or "").strip()
-            review_dt_str = (row.get("ReviewdateTime") or "").strip()
-            filename = (row.get("Filename") or "imported").strip()
+            raw_date = (row.get("raw_date") or "").strip()
+            raw_details = (row.get("raw_details") or "").strip()
+            debit_str = (row.get("debit") or "").strip()
+            credit_str = (row.get("credit") or "").strip()
+            acc_name = (row.get("account_name") or "").strip() or None
+            acc_type = (row.get("account_type") or "").strip() or None
+            old_category = (row.get("category") or "").strip()
+            notes = (row.get("notes") or "").strip() or None
+            review_status_str = (row.get("review_status") or "").strip()
+            review_dt_str = (row.get("reviewed_at") or "").strip()
+            filename = (row.get("filename") or "imported").strip()
 
             # Parse amounts
             debit = None
